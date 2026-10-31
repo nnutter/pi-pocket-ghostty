@@ -77,6 +77,9 @@ const KEYS_SENT_AS_KEYS = new Set([
     "F12",
 ]);
 
+/** What takes a key for itself: a field of the app's own, which the terminal must not take the key from. */
+const EDITABLE = "input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox']";
+
 /** How a run's flags change the look of its text. */
 function decoration(flags) {
     const lines = [];
@@ -251,6 +254,69 @@ export class TerminalView {
         this.#stops.push(() => document.fonts?.removeEventListener?.("loadingdone", remeasure));
     }
 
+    /**
+     * A key, from the input that holds the keys or from the window when the focus is elsewhere. `typed` says that the
+     * character will also come as an input event, which is how a focused input gives its letters.
+     */
+    #keys(event, typed) {
+        const modified = event.ctrlKey || event.altKey || event.metaKey;
+        const armed = this.#armedNow();
+
+        // Ctrl+V and ⌘V paste through the browser, which pastes into the field that has the focus. When that field is
+        // this terminal's input, the browser's own paste comes next, and the terminal takes the text from there. When
+        // the focus is elsewhere -- a selection took it -- there is no field for it to paste into, so the terminal reads
+        // the clipboard itself, in the gesture that the key makes, and leaves the selection where it is.
+        if (!armed && (event.ctrlKey || event.metaKey) && event.code === "KeyV") {
+            if (!typed) {
+                event.preventDefault();
+                void this.#read();
+            }
+
+            return;
+        }
+
+        // A character that no input will take: the terminal takes it as the text that the person typed.
+        if (!KEYS_SENT_AS_KEYS.has(event.code) && !modified && !armed) {
+            if (!typed && event.key.length === 1) {
+                event.preventDefault();
+                this.#send({ text: event.key });
+            }
+
+            return;
+        }
+
+        event.preventDefault();
+
+        // Control and the left bracket is Escape to every terminal that a person has used, and the encoder here has no
+        // byte for it: on a device whose Escape key belongs to the system, that is the Escape that is left.
+        if (event.code === "BracketLeft" && (event.ctrlKey || armed?.ctrl === true)) {
+            this.#send({ keys: [{ key: "Escape" }] });
+            this.#disarm();
+
+            return;
+        }
+
+        const key = keyEventOf(event);
+
+        if (key === null) return;
+
+        // iPadOS takes Escape for itself: it puts a soft keyboard away, and the terminal may not have the key. The key's
+        // work goes on, and the keyboard is asked back where the system allows it.
+        if (event.code === "Escape" && this.#keyboardUp()) {
+            setTimeout(() => {
+                if (!this.#destroyed && !this.#focused()) this.#input.focus({ preventScroll: true });
+            }, 60);
+        }
+
+        // A modifier that a key of the row armed is spent on this key, as a keyboard's own would be.
+        if (armed) {
+            this.#send({ keys: [{ ...key, mods: { ...key.mods, ...armed } }] });
+            this.#disarm();
+        } else {
+            this.#send({ keys: [key] });
+        }
+    }
+
     #listen() {
         const screen = this.#screen;
         const input = this.#input;
@@ -269,6 +335,21 @@ export class TerminalView {
         };
 
         screen.addEventListener("pointerup", tap);
+
+        // A person who drags over a line means to have it. The selection goes to the clipboard as the drag ends -- the
+        // gesture that a browser wants for the clipboard -- and nothing is said, since selecting is not a command.
+        screen.addEventListener("pointerup", () => {
+            const selection = globalThis.getSelection();
+
+            // Only the screen's own text: a selection in the message box beside it belongs to the person's next command.
+            if (selection === null || selection.rangeCount === 0 || !screen.contains(selection.anchorNode)) return;
+
+            const text = selection.toString();
+
+            if (text.trim() === "") return;
+
+            void this.#write(text);
+        });
         screen.addEventListener("click", tap);
         screen.addEventListener("wheel", (event) => {
             event.preventDefault();
@@ -283,46 +364,21 @@ export class TerminalView {
             this.#scroll(lines);
         }, { passive: false });
 
-        input.addEventListener("keydown", (event) => {
-            const modified = event.ctrlKey || event.altKey || event.metaKey;
-            const armed = this.#armedNow();
+        input.addEventListener("keydown", (event) => this.#keys(event, true));
 
-            // Ctrl+V and ⌘V paste through the browser, so the terminal gets the clipboard as text.
-            if (!armed && (event.ctrlKey || event.metaKey) && event.code === "KeyV") return;
+        // A person who selects a line on the screen goes on typing. A browser takes the focus off the input as a
+        // selection starts, and giving it back clears the selection, so the keys come to the terminal without it. A
+        // field of the app's own keeps its keys: the message box beside the panel is not the terminal.
+        const loose = (event) => {
+            if (this.#destroyed || event.defaultPrevented || event.isComposing) return;
+            if (document.activeElement === input || !this.#paneFocused()) return;
+            if (event.target instanceof Element && event.target.closest(EDITABLE) !== null) return;
 
-            if (!KEYS_SENT_AS_KEYS.has(event.code) && !modified && !armed) return;
+            this.#keys(event, false);
+        };
 
-            event.preventDefault();
-
-            // Control and the left bracket is Escape to every terminal that a person has used, and the encoder here has
-            // no byte for it: on a device whose Escape key belongs to the system, that is the Escape that is left.
-            if (event.code === "BracketLeft" && (event.ctrlKey || armed?.ctrl === true)) {
-                this.#send({ keys: [{ key: "Escape" }] });
-                this.#disarm();
-
-                return;
-            }
-
-            const key = keyEventOf(event);
-
-            if (key === null) return;
-
-            // iPadOS takes Escape for itself: it puts a soft keyboard away, and the terminal may not have the key. The
-            // key's work goes on, and the keyboard is asked back where the system allows it.
-            if (event.code === "Escape" && this.#keyboardUp()) {
-                setTimeout(() => {
-                    if (!this.#destroyed && !this.#focused()) this.#input.focus({ preventScroll: true });
-                }, 60);
-            }
-
-            // A modifier that a key of the row armed is spent on this key, as a keyboard's own would be.
-            if (armed) {
-                this.#send({ keys: [{ ...key, mods: { ...key.mods, ...armed } }] });
-                this.#disarm();
-            } else {
-                this.#send({ keys: [key] });
-            }
-        });
+        window.addEventListener("keydown", loose, true);
+        this.#stops.push(() => window.removeEventListener("keydown", loose, true));
 
         input.addEventListener("input", () => {
             const text = input.value;
@@ -491,6 +547,13 @@ export class TerminalView {
         return document.activeElement === this.#input;
     }
 
+    /** Whether this pane is the one that the page takes keys for, or the page's only pane. */
+    #paneFocused() {
+        const pane = this.#screen.closest(".gt-pane");
+
+        return pane === null || pane.classList.contains("is-focused");
+    }
+
     /** Puts the keyboard away: the row and the screen with it. */
     blur() {
         // The keys go because a person said so: nothing that was waiting to take them back may take them back.
@@ -539,10 +602,26 @@ export class TerminalView {
         this.#input.focus({ preventScroll: true });
     }
 
-    /** Hands text to the browser's clipboard, as a program asked with OSC 52. */
+    /** Reads the clipboard, in the gesture that asked for it, and pastes what it holds. */
+    async #read() {
+        try {
+            const text = await navigator.clipboard.readText();
+
+            if (text !== "") this.#paste(text);
+        } catch {
+            this.#flash("Could not read the clipboard: the browser said no");
+        }
+    }
+
+    /** Hands text to the browser's clipboard, as a program asked with OSC 52, and says that it did. */
     async #copy(text) {
-        // The copy comes from a program, not from the person's own gesture, and a browser may sit on the question
-        // of the clipboard for a long time: a fallback that answers now is better than a copy that waits.
+        this.#flash((await this.#write(text)) ? `Copied ${text.length} characters` : "Could not copy: the browser said no");
+    }
+
+    /** Writes text to the clipboard, and answers whether the browser took it. */
+    async #write(text) {
+        // The copy may come from a program, not from the person's own gesture, and a browser may sit on the question of
+        // the clipboard for a long time: a fallback that answers now is better than a copy that waits.
         const written = await Promise.race([
             navigator.clipboard.writeText(text).then(
                 () => true,
@@ -554,6 +633,10 @@ export class TerminalView {
         let copied = written;
 
         if (!copied) {
+            // The fallback copies what a hidden field holds, which is a selection of the page's own: the person's
+            // selection goes back where it was, since a copy must not take away what it copied.
+            const selection = globalThis.getSelection();
+            const kept = selection === null ? [] : [...Array(selection.rangeCount)].map((_, at) => selection.getRangeAt(at).cloneRange());
             const holder = document.createElement("textarea");
 
             holder.value = text;
@@ -563,9 +646,15 @@ export class TerminalView {
             holder.select();
             copied = document.execCommand("copy");
             holder.remove();
+
+            if (selection !== null && kept.length > 0) {
+                selection.removeAllRanges();
+
+                for (const range of kept) selection.addRange(range);
+            }
         }
 
-        this.#flash(copied ? `Copied ${text.length} characters` : "Could not copy: the browser said no");
+        return copied;
     }
 
     /** Reads the clipboard for a program that asked (OSC 52 with `?`), and answers with what it holds. */

@@ -1044,6 +1044,238 @@ describe("the room inside the frame", () => {
     }, 30_000);
 });
 
+describe("a selection on the screen", () => {
+    /**
+     * A person who drags over a line means to have it. The terminal writes the selection to the clipboard as the drag
+     * ends -- the gesture that a browser wants for the clipboard -- and says nothing, since selecting is not a command
+     * that asks to be answered. The page's own clipboard is stubbed here: what a browser lets a page write is its
+     * business, and what this proves is that the selection is offered to it.
+     */
+    test("goes to the clipboard as the drag ends, without a word", async () => {
+        const page = await openWide();
+
+        try {
+            await page.evaluate(() => {
+                const clipboard = { wrote: [] as string[] };
+
+                Object.defineProperty(navigator, "clipboard", {
+                    configurable: true,
+                    value: { writeText: (text: string) => (clipboard.wrote.push(text), Promise.resolve()) },
+                });
+                (window as unknown as { clipboard: typeof clipboard }).clipboard = clipboard;
+
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "printf 'take this line\\n'\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await page.waitForFunction(() => [...document.querySelectorAll(".gt-row")].some((row) => row.textContent?.includes("take this line")), {
+                timeout: 15_000,
+            });
+
+            const wrote = await page.evaluate(async () => {
+                const row = [...document.querySelectorAll(".gt-row")].find((each) => each.textContent?.includes("take this line"))!;
+                const screen = document.querySelector(".gt-screen")!;
+                const range = document.createRange();
+
+                range.selectNodeContents(row);
+                getSelection()!.removeAllRanges();
+                getSelection()!.addRange(range);
+
+                // The end of a drag, as the screen hears it.
+                screen.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+                await new Promise((resolve) => setTimeout(resolve, 100));
+
+                return (window as unknown as { clipboard: { wrote: string[] } }).clipboard.wrote;
+            });
+
+            expect(wrote).toHaveLength(1);
+            expect(wrote[0]).toContain("take this line");
+
+            // And a selection that is empty, or outside the screen, writes nothing.
+            const quiet = await page.evaluate(async () => {
+                const screen = document.querySelector(".gt-screen")!;
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                getSelection()!.removeAllRanges();
+                input.focus();
+                screen.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+                await new Promise((resolve) => setTimeout(resolve, 100));
+
+                return (window as unknown as { clipboard: { wrote: string[] } }).clipboard.wrote.length;
+            });
+
+            expect(quiet).toBe(1);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("a paste while text is selected", () => {
+    /**
+     * ⌘V and Ctrl+V paste through the browser, which pastes into the field that has the focus. A selection takes the
+     * focus off that field, so the terminal reads the clipboard itself, inside the gesture that the key makes, and
+     * pastes it as a program's paste. The selection stays: it is what the person copied.
+     */
+    test("pastes what the clipboard holds, and leaves the selection alone", async () => {
+        const page = await openWide();
+
+        try {
+            await page.evaluate(() => {
+                Object.defineProperty(navigator, "clipboard", {
+                    configurable: true,
+                    value: {
+                        writeText: () => Promise.resolve(),
+                        readText: () => Promise.resolve("echo from-the-clipboard"),
+                    },
+                });
+
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "printf 'keep me selected\\n'\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await page.waitForFunction(() => [...document.querySelectorAll(".gt-row")].some((row) => row.textContent?.includes("keep me selected")), {
+                timeout: 15_000,
+            });
+
+            const selected = await page.evaluate(() => {
+                const row = [...document.querySelectorAll(".gt-row")].find((each) => each.textContent?.includes("keep me selected"))!;
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+                const range = document.createRange();
+
+                range.selectNodeContents(row);
+                getSelection()!.removeAllRanges();
+                getSelection()!.addRange(range);
+                input.blur();
+
+                return getSelection()!.toString().length;
+            });
+
+            expect(selected).toBeGreaterThan(0);
+
+            await page.keyboard.down("Control");
+            await page.keyboard.press("v");
+            await page.keyboard.up("Control");
+            await settle(page, 900);
+            await page.keyboard.press("Enter");
+
+            await page.waitForFunction(() => [...document.querySelectorAll(".gt-row")].some((row) => row.textContent?.trim() === "from-the-clipboard"), {
+                timeout: 15_000,
+            });
+
+            expect(await page.evaluate(() => getSelection()!.toString())).toContain("keep me selected");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("the clipboard's fallback", () => {
+    /**
+     * A browser that refuses the clipboard outright leaves the copy to a hidden field and `execCommand`, which selects
+     * that field: a person's selection is gone unless it is put back, and the copy takes away the thing it copied.
+     */
+    test("gives the person's selection back after it copies", async () => {
+        const page = await openWide();
+
+        try {
+            const kept = await page.evaluate(async () => {
+                Object.defineProperty(navigator, "clipboard", {
+                    configurable: true,
+                    value: { writeText: () => Promise.reject(new Error("no")) },
+                });
+
+                const calls: string[] = [];
+
+                (window as unknown as { copies: string[] }).copies = calls;
+                document.execCommand = (name: string) => (calls.push(name), true);
+
+                const screen = document.querySelector(".gt-screen")!;
+                const range = document.createRange();
+
+                range.selectNodeContents(document.querySelector(".gt-row")!);
+                getSelection()!.removeAllRanges();
+                getSelection()!.addRange(range);
+
+                screen.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+                await new Promise((resolve) => setTimeout(resolve, 200));
+
+                return {
+                    copied: (window as unknown as { copies: string[] }).copies,
+                    word: document.querySelector(".gt-row")!.textContent ?? "",
+                    selected: getSelection()!.toString().length > 0,
+                    ranges: getSelection()!.rangeCount,
+                };
+            });
+
+            // The copy happened, by the fallback, and the selection that it copied is still the person's.
+            expect(kept.copied).toEqual(["copy"]);
+            expect(kept.word.length).toBeGreaterThan(0);
+            expect(kept.selected).toBe(true);
+            expect(kept.ranges).toBe(1);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("the keys while text is selected", () => {
+    /**
+     * A person selects a line on the screen to copy it, and goes on typing. A browser moves the focus off the terminal's
+     * input as the selection starts -- and focusing it again clears the selection -- so the keys have to reach the
+     * terminal without the focus, or the person has to dismiss the selection before they can type.
+     */
+    test("reach the shell, and the selection stays", async () => {
+        const page = await openWide();
+
+        try {
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "printf 'select me please\\n'\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await page.waitForFunction(() => [...document.querySelectorAll(".gt-row")].some((row) => row.textContent?.includes("select me please")), {
+                timeout: 15_000,
+            });
+
+            // What a drag over the text leaves: a selection, and the focus back on the page.
+            const selected = await page.evaluate(() => {
+                const row = [...document.querySelectorAll(".gt-row")].find((each) => each.textContent?.includes("select me please"))!;
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+                const range = document.createRange();
+
+                range.selectNodeContents(row);
+                getSelection()!.removeAllRanges();
+                getSelection()!.addRange(range);
+                input.blur();
+
+                return { text: getSelection()!.toString(), focused: document.activeElement === input };
+            });
+
+            expect(selected.text).toContain("select me please");
+            expect(selected.focused).toBe(false);
+
+            await page.keyboard.type("echo typed-with-a-selection");
+            await page.keyboard.press("Enter");
+
+            await page.waitForFunction(() => [...document.querySelectorAll(".gt-row")].some((row) => row.textContent?.includes("typed-with-a-selection")), {
+                timeout: 15_000,
+            });
+
+            // The selection is still there to copy, since typing did not have to move the focus to reach the shell.
+            expect(await page.evaluate(() => getSelection()!.toString())).toContain("select me please");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
 describe("the screen", () => {
     test("draws what the shell prints", async () => {
         const page = await openPhone();
