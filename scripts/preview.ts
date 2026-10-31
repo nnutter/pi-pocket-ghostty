@@ -1,6 +1,6 @@
 /**
  * A preview of the terminal's screen without Pi Pocket: the module's own routes behind a small HTTP server, and a page
- * that gives `TerminalView` (from `src/web/terminal.js`) a fake `pocket`. Use it to see and type into a real shell in a
+ * that gives `TerminalView` (from `extensions/ghostty-terminal/terminal.js`) a fake `pocket`. Use it to see and type into a real shell in a
  * browser, with the app's look kept by the page's own tokens.
  *
  *     bun run preview        # http://127.0.0.1:4711
@@ -10,7 +10,7 @@
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { realpathSync } from "node:fs";
-import createGhosttyTerminal from "../src/ghostty-terminal.ts";
+import createGhosttyTerminal from "../extensions/ghostty-terminal.ts";
 import { fakeWeb, type FakeWeb } from "../test/fake-web.ts";
 
 const root = join(import.meta.dir, "..");
@@ -105,7 +105,7 @@ async function answer(request: Request): Promise<Response> {
     }
 
     if (url.pathname.startsWith("/x/")) {
-        const file = Bun.file(join(root, "src", "web", url.pathname.slice("/x/".length)));
+        const file = Bun.file(join(root, "extensions", "ghostty-terminal", url.pathname.slice("/x/".length)));
 
         if (!(await file.exists())) return new Response("not found", { status: 404 });
 

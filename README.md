@@ -28,7 +28,7 @@ It writes:
 | `~/.pi-pocket/extensions/ghostty-terminal/`    | the browser module: the panel, its screen, its stylesheet         |
 | `~/.pi-pocket/ghostty-terminal/`               | the runtime: `pty-host.ts` and `libghostty-vt`                    |
 
-Then turn it on in **Menu → Extensions → Ghostty terminal**. It docks beside the conversation where the Browser and
+Then turn it on in **Menu → Extensions → Ghostty**. It docks beside the conversation where the Browser and
 Files panels dock, and takes a **tile in the places** — a terminal belongs to the session that it works in, not to the
 app — and `Control+Backquote` opens and closes it from anywhere. Set `PI_POCKET_DATA` to install into another data
 folder.
@@ -37,14 +37,14 @@ Settings, in Menu → Extensions: the shell to run (empty: your own, with `-l`),
 
 ## How it is put together
 
-- `src/ghostty-terminal.ts` — the drop-in module. One Bun process for each terminal, a `Terminal` record with the
+- `extensions/ghostty-terminal.ts` — the drop-in module. One Bun process for each terminal, a `Terminal` record with the
   screen that it last sent, and the routes that the page calls: create, attach, input, resize, scroll, end.
 - `src/pty-host.ts` — the Bun side: `Bun.spawn` with a pty, `Terminal` + `RenderState` from `libghostty-vt`, and a
   frame of the rows that changed, at most one each 16 ms.
-- `src/web/index.js` — the panel, its tile in the places, and a launcher action.
-- `src/web/terminal.js` — the screen: runs of cells painted into rows of spans, the cursor, the wheel for scrollback,
+- `extensions/ghostty-terminal/index.js` — the panel, its tile in the places, and a launcher action.
+- `extensions/ghostty-terminal/terminal.js` — the screen: runs of cells painted into rows of spans, the cursor, the wheel for scrollback,
   and a hidden textarea whose keystrokes go to `libghostty-vt`'s key encoder on the server.
-- `src/web/terminal.css` — the look, from the app's theme tokens.
+- `extensions/ghostty-terminal/terminal.css` — the look, from the app's theme tokens.
 
 Why the extra process: `libghostty-vt` imports `bun:ffi`, which Node does not have. Nothing else needs Bun.
 
@@ -187,3 +187,23 @@ browser; the default is the Chromium that Pi Pocket keeps for its own browser pa
 `scripts/preview.ts` serves the module's own routes behind a small HTTP server and gives the page a fake `pocket`, so
 the screen can be tried in a browser before Pi Pocket loads the extension. `test/fake-web.ts` is the same idea for
 tests: it records what the module sends and lets a test call its routes.
+
+## The gallery entry and the sidecar
+
+`docs/gallery-entry.json` is this extension's gallery entry: its `title` is **Ghostty**, which is the name a person
+reads, though the module is `ghostty-terminal` and Pi Pocket names a local drop-in after its file.
+
+Pi Pocket reads no entry from a repository. What puts the title in **Menu → Extensions** is the provenance sidecar that
+it would write for a gallery install: `ghostty-terminal.gallery.json`, in the drop-in folder, holding that entry and the
+index it came from. Write it after the files are installed:
+
+```sh
+mise run ext:install   # the module and its browser module
+mise run sidecar       # ~/.pi-pocket/extensions/ghostty-terminal.gallery.json
+```
+
+`mise run gallery-entry` writes the entry again for `HEAD`, with each file's size and SHA-256 at that commit: run it on
+the commit you deploy, before the sidecar, since the hashes have to be of the files that are out.
+
+The sidecar is not kept in the repository. It says where one installation came from, and its hashes are of the files on
+the machine that wrote it.

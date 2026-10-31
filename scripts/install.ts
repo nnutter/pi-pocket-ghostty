@@ -40,10 +40,10 @@ function copy(from: string, to: string): void {
 }
 
 for (const file of browserModule) {
-    copy(join(root, "src", "web", file), join(web, file));
+    copy(join(root, "extensions", "ghostty-terminal", file), join(web, file));
 }
 
-copy(join(root, "src", "ghostty-terminal.ts"), join(dropins, "ghostty-terminal.ts"));
+copy(join(root, "extensions", "ghostty-terminal.ts"), join(dropins, "ghostty-terminal.ts"));
 
 for (const file of runtimeFiles) {
     copy(join(root, "src", file), join(runtime, file));

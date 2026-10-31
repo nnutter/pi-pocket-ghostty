@@ -4,7 +4,7 @@
  */
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
-import createGhosttyTerminal from "../src/ghostty-terminal.ts";
+import createGhosttyTerminal from "../extensions/ghostty-terminal.ts";
 import { fakeWeb, textOf, type FakeWeb, type FrameEvent } from "./fake-web.ts";
 
 const root = join(import.meta.dir, "..");

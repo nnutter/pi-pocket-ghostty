@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const folder = join(import.meta.dir, "..", "src", "web");
+const folder = join(import.meta.dir, "..", "extensions", "ghostty-terminal");
 const files = readdirSync(folder).filter((file) => file.endsWith(".js"));
 
 describe("the browser module", () => {
