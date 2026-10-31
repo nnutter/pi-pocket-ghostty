@@ -9,6 +9,9 @@
     gap: 0.5rem;
     height: 100%;
     min-height: 0;
+
+    /* The terminal's own width, not the window's: a panel beside a conversation is narrow in a wide window. */
+    container-type: inline-size;
 }
 
 .gt-bar {
@@ -218,17 +221,59 @@
     }
 }
 
-/* The textarea that holds the keys: out of sight, but focused, so a phone shows its keyboard. */
+/*
+ * The textarea that holds the keys: in sight, at the cursor, and invisible.
+ *
+ * A system that owns the keyboard shows it for an input that it can see. One parked off the edge of the page is an
+ * input that a phone will focus and not raise a keyboard for, which is a tap that does nothing until the next one. Its
+ * text is 16px because a smaller one makes a phone zoom the page in when it takes the focus.
+ */
 .gt-input {
     position: absolute;
-    left: -9999px;
+    left: 0;
     top: 0;
     width: 1px;
     height: 1px;
     padding: 0;
     border: 0;
-    opacity: 0;
+    margin: 0;
     resize: none;
+    overflow: hidden;
+
+    font-size: 16px;
+    line-height: 1;
+    color: transparent;
+    background: transparent;
+    caret-color: transparent;
+    opacity: 0.01;
+
+    /* A finger belongs to the screen, which gives the keys to this input; a tap here would be a tap that moves a caret. */
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* A panel that is narrow, in a window that is not, still has to keep its keys and its name. */
+@container (max-width: 620px) {
+    .gt-cwd,
+    .gt-flash {
+        display: none;
+    }
+
+    .button.gt-small {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.8rem;
+    }
+
+    .gt-bar {
+        gap: 0.25rem;
+    }
+}
+
+/* Narrower than a panel usually is: the text size is a preference, and the shell's own buttons are not. */
+@container (max-width: 460px) {
+    .gt-font {
+        display: none;
+    }
 }
 
 @media (max-width: 699px) {

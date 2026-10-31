@@ -10,9 +10,13 @@ description = "Serve the terminal's page with a real shell, without Pi Pocket"
 run = "bun run scripts/preview.ts"
 
 [tasks.test]
-description = "Run the tests against a real pty"
+description = "Run every test: the module against a real pty, and the page in a browser"
 run = "bun test"
 
+[tasks."test:fast"]
+description = "Run the tests that need no browser"
+run = "bun test test/escapes.test.ts test/module.test.ts test/pty-host.test.ts test/web.test.ts"
+
 [tasks.check]
-description = "Typecheck"
-run = "bun x tsc --noEmit"
+description = "Typecheck, and parse the browser module as a browser does"
+run = "bun x tsc --noEmit && node --check src/web/index.js && node --check src/web/terminal.js"

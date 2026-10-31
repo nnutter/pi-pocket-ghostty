@@ -14,6 +14,7 @@
         "@types/bun": "^1.4.4",
         "htm": "^3.1.1",
         "preact": "^11.1.0",
+        "puppeteer-core": "^25.16.0",
         "typescript": "^7.0.2"
     }
 }

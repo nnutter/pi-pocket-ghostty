@@ -15,6 +15,38 @@ const INVERSE = 128;
 const INVISIBLE = 256;
 
 /**
+ * The height of the window with no keyboard over it.
+ *
+ * A window that got shorter lost that height to a keyboard, and a moment without the keys -- a finger on a button, a
+ * pane taking them -- does not make the shorter window the one at rest. So the rest is the tallest that the window has
+ * been, and only a turn of the device, which is a new width, makes a new one.
+ */
+export function restingHeight(previous, { height, width, lastWidth, typing }) {
+    if (width !== lastWidth) return height;
+    if (typing) return previous;
+
+    return previous === 0 ? height : Math.max(previous, height);
+}
+
+/**
+ * Whether a soft keyboard has the window, and so whether the row of keys that it has not got belongs above it.
+ *
+ * A keyboard either takes a keyboard's worth of height -- the drop from the window at rest -- or covers the window
+ * without changing it, which is what a phone does. The third way is for a page that opens while the keyboard is already
+ * up, when there is no drop to see: a window on a touch screen that is much shorter than the screen.
+ *
+ * The keyboard's room is the truth about the keyboard: once it is there, a moment without the focus is not a keyboard
+ * that left, so a row that was up stays up until the room comes back.
+ */
+export function keyboardShown({ height, rest, viewportHeight, innerHeight, availHeight, coarse, typing, wasUp }) {
+    const dropped = rest > 0 && height < rest - 100;
+    const covered = viewportHeight !== undefined && viewportHeight < innerHeight - 100;
+    const cramped = coarse === true && availHeight !== undefined && innerHeight < availHeight * 0.72;
+
+    return (dropped || covered || cramped) && (typing === true || wasUp === true);
+}
+
+/**
  * The names that a Nerd Font goes by, in the order to try them: the same font is installed under a name that its build
  * chose, and a native terminal finds it where a browser does not. The first that this device has is the one to use.
  */
@@ -128,6 +160,7 @@ export class TerminalView {
     #container;
     #onState;
     #onClose;
+    #keyboardUp;
     #fresh = false;
     #state = {};
 
@@ -150,8 +183,11 @@ export class TerminalView {
     #stops = [];
     #eventStops = [];
     #armed = { ctrl: false, shift: false, alt: false };
-    #resting = 0;
-    #keyboardTimer = null;
+    #keepUntil = 0;
+    #grabTimer = null;
+    #focusTimer = null;
+    #reported = false;
+    #at = null;
     #resizeTimer = null;
     #opening = false;
     #destroyed = false;
@@ -161,11 +197,12 @@ export class TerminalView {
     #wheel = 0;
     #pendingScroll = 0;
 
-    constructor(pocket, { container, onState, onClose, fresh }) {
+    constructor(pocket, { container, onState, onClose, fresh, keyboardUp }) {
         this.#pocket = pocket;
         this.#container = container;
         this.#onState = onState;
         this.#onClose = onClose;
+        this.#keyboardUp = keyboardUp ?? (() => false);
         this.#fresh = fresh === true;
         this.#font = Number(globalThis.localStorage?.getItem("x.ghostty-terminal.font")) || 13;
 
@@ -231,14 +268,21 @@ export class TerminalView {
         const screen = this.#screen;
         const input = this.#input;
 
-        const focus = () => input.focus({ preventScroll: true });
+        const focus = () => {
+            this.#place();
+            input.focus({ preventScroll: true });
+        };
 
-        // A tap or a click gives the keys to the terminal, unless the person dragged to select text.
-        screen.addEventListener("pointerup", () => {
+        // A tap or a click gives the keys to the terminal, unless the person dragged to select text. Both a pointer's
+        // end and a click ask for them: a phone answers one of them with a keyboard.
+        const tap = () => {
             if (globalThis.getSelection()?.toString()) return;
 
             focus();
-        });
+        };
+
+        screen.addEventListener("pointerup", tap);
+        screen.addEventListener("click", tap);
         screen.addEventListener("wheel", (event) => {
             event.preventDefault();
 
@@ -263,9 +307,26 @@ export class TerminalView {
 
             event.preventDefault();
 
+            // Control and the left bracket is Escape to every terminal that a person has used, and the encoder here has
+            // no byte for it: on a device whose Escape key belongs to the system, that is the Escape that is left.
+            if (event.code === "BracketLeft" && (event.ctrlKey || armed?.ctrl === true)) {
+                this.#send({ keys: [{ key: "Escape" }] });
+                this.#disarm();
+
+                return;
+            }
+
             const key = keyEventOf(event);
 
             if (key === null) return;
+
+            // iPadOS takes Escape for itself: it puts a soft keyboard away, and the terminal may not have the key. The
+            // key's work goes on, and the keyboard is asked back where the system allows it.
+            if (event.code === "Escape" && this.#keyboardUp()) {
+                setTimeout(() => {
+                    if (!this.#destroyed && !this.#focused()) this.#input.focus({ preventScroll: true });
+                }, 60);
+            }
 
             // A modifier that a key of the row armed is spent on this key, as a keyboard's own would be.
             if (armed) {
@@ -294,19 +355,23 @@ export class TerminalView {
 
         input.addEventListener("focus", () => {
             screen.classList.add("gt-typing");
-            this.#focus(true);
-
-            // The keyboard takes its room a moment after the focus, so the check runs then as well as now.
-            clearTimeout(this.#keyboardTimer);
-            this.#checkKeyboard();
-            this.#keyboardTimer = setTimeout(() => this.#checkKeyboard(), 400);
+            this.#focus();
         });
         input.addEventListener("blur", () => {
             screen.classList.remove("gt-typing");
-            this.#focus(false);
-            clearTimeout(this.#keyboardTimer);
-            this.#resting = window.innerHeight;
-            this.#publish({ softKeyboard: false });
+            this.#focus();
+
+            // A key of the row that a finger left the keys for: the keyboard is asked back before the tap ends, since a
+            // system that took it away with the focus gives it back only to a page that asks inside a gesture.
+            clearTimeout(this.#grabTimer);
+
+            if (Date.now() < this.#keepUntil) {
+                this.#grabTimer = setTimeout(() => {
+                    if (!this.#destroyed && Date.now() < this.#keepUntil && !this.#focused()) {
+                        this.#input.focus({ preventScroll: true });
+                    }
+                }, 0);
+            }
             this.#disarm();
         });
 
@@ -314,35 +379,7 @@ export class TerminalView {
 
         observer.observe(screen);
         this.#stops.push(() => observer.disconnect());
-        this.#watchKeyboard();
         this.#watchTab();
-    }
-
-    /** The keys that a soft keyboard has not got are worth a row above it, and only while it is there. */
-    #watchKeyboard() {
-        if (navigator.maxTouchPoints === 0) return;
-
-        const remember = () => {
-            if (!this.#focused()) this.#resting = window.innerHeight;
-        };
-        const onResize = () => {
-            remember();
-            this.#checkKeyboard();
-        };
-        // A listener is called with the window for `this`, so it goes through a function of the view's own.
-        const check = () => this.#checkKeyboard();
-
-        remember();
-
-        window.addEventListener("resize", onResize);
-        window.addEventListener("focus", check);
-        window.visualViewport?.addEventListener("resize", check);
-
-        this.#stops.push(() => {
-            window.removeEventListener("resize", onResize);
-            window.removeEventListener("focus", check);
-            window.visualViewport?.removeEventListener("resize", check);
-        });
     }
 
     /**
@@ -461,28 +498,25 @@ export class TerminalView {
         return document.activeElement === this.#input;
     }
 
-    /**
-     * Whether a soft keyboard has the window, and so whether the row of keys that it has not got belongs above it.
-     *
-     * A keyboard either takes a keyboard's worth of height -- the drop from the window at rest -- or covers the window
-     * without changing it, which is what a phone does. The third way is for a page that opens while the keyboard is
-     * already up, when there is no drop to see: a window on a touch screen that is much shorter than the screen.
-     */
-    #checkKeyboard() {
-        const viewport = window.visualViewport;
-        const height = Math.min(window.innerHeight, viewport?.height ?? window.innerHeight);
-        const dropped = this.#resting > 0 && height < this.#resting - 100;
-        const covered = viewport !== undefined && viewport.height < window.innerHeight - 100;
-        const cramped =
-            globalThis.matchMedia("(pointer: coarse)").matches &&
-            window.innerHeight < (globalThis.screen?.availHeight ?? window.innerHeight) * 0.72;
-
-        this.#publish({ softKeyboard: this.#focused() && (dropped || covered || cramped) });
-    }
-
     /** Puts the keyboard away: the row and the screen with it. */
     blur() {
+        // The keys go because a person said so: nothing that was waiting to take them back may take them back.
+        this.#keepUntil = 0;
+        clearTimeout(this.#grabTimer);
         this.#input.blur();
+    }
+
+    /**
+     * Says that a finger is on a key of the row, which is not a reason to lose the keyboard: a tap that the browser
+     * turns into a focus change is a tap whose focus the terminal takes back.
+     */
+    keepKeys() {
+        this.#keepUntil = Date.now() + 800;
+    }
+
+    /** Says that the keys are going somewhere else on purpose, so that this pane does not ask for them back. */
+    releaseKeys() {
+        this.#keepUntil = 0;
     }
 
     /** A program rang the terminal's bell: a moment of light, as a terminal with a quiet bell does. */
@@ -496,8 +530,19 @@ export class TerminalView {
         this.#bellTimer = setTimeout(() => this.#screen.classList.remove("gt-bell"), 140);
     }
 
+    /** Puts the input that holds the keys where the cursor is, which is where a phone shows its keyboard. */
+    #place() {
+        const at = this.#at;
+
+        if (at === null) return;
+
+        this.#input.style.left = `${at.x * this.#cell.width}px`;
+        this.#input.style.top = `${at.y * this.#cell.height}px`;
+    }
+
     /** Takes the keys, as a pane beside another one does when a person moves to it. */
     focus() {
+        this.#place();
         this.#input.focus({ preventScroll: true });
     }
 
@@ -590,7 +635,7 @@ export class TerminalView {
     #flash(message) {
         clearTimeout(this.#flashTimer);
         clearTimeout(this.#bellTimer);
-        clearTimeout(this.#keyboardTimer);
+        clearTimeout(this.#focusTimer);
         this.#publish({ flash: message });
 
         this.#flashTimer = setTimeout(() => {
@@ -607,10 +652,21 @@ export class TerminalView {
     }
 
     /** Tells the program whether this terminal has the person's attention. */
-    #focus(inside) {
+    #focus() {
         if (this.#id === null || this.#destroyed) return;
 
-        this.#pocket.api(`terminals/${this.#id}/focus`, { inside }).catch(() => {});
+        // A tap can take the focus away and give it back within a moment, and a program that watches for focus would
+        // redraw a whole screen for a change that never happened. Only a focus that settles is reported.
+        clearTimeout(this.#focusTimer);
+
+        this.#focusTimer = setTimeout(() => {
+            const inside = this.#focused();
+
+            if (inside === this.#reported) return;
+
+            this.#reported = inside;
+            this.#pocket.api(`terminals/${this.#id}/focus`, { inside }).catch(() => {});
+        }, 250);
     }
 
     /** Moves the view back through the scrollback: the lines of a wheel's turn, taken together, one call each 40 ms. */
@@ -844,6 +900,8 @@ export class TerminalView {
         const look = `${shape}${frame.cursor.blink ? " blink" : ""}`;
 
         cursor.style.transform = `translate(${frame.cursor.x * this.#cell.width}px, ${frame.cursor.y * this.#cell.height}px)`;
+
+        this.#at = frame.cursor;
         cursor.style.opacity = frame.cursor.visible ? "1" : "0";
 
         if (cursor.dataset.look !== look) {
@@ -884,7 +942,7 @@ export class TerminalView {
         clearTimeout(this.#scrollTimer);
         clearTimeout(this.#flashTimer);
         clearTimeout(this.#bellTimer);
-        clearTimeout(this.#keyboardTimer);
+        clearTimeout(this.#focusTimer);
 
         for (const stop of [...this.#stops, ...this.#eventStops]) stop();
 

@@ -4,7 +4,7 @@
 /** The version of `pocket` this module was written for. */
 export const pocketApi = 1;
 
-import { TerminalView } from "./terminal.js";
+import { TerminalView, keyboardShown, restingHeight } from "./terminal.js";
 
 /** A prompt, as a 24×24 stroked path like the app's own icons. */
 const PROMPT = "M5 7l4 4-4 4M12 16h7";
@@ -144,6 +144,87 @@ function neighbour(tree, focused, direction) {
     return best;
 }
 
+/**
+ * Whether a soft keyboard has the window, and so whether the row of keys that it has not got belongs above it.
+ *
+ * A keyboard either takes a keyboard's worth of height -- the drop from the window at rest -- or covers the window
+ * without changing it, which is what a phone does. The third way is for a page that opens while the keyboard is already
+ * up, when there is no drop to see: a window on a touch screen that is much shorter than the screen.
+ *
+ * The page answers this for all of its panes at once. A pane of its own answering would take the row away for the moment
+ * of every switch between panes, which is a flicker over a keyboard that never moved.
+ */
+function useSoftKeyboard(pocket) {
+    const { useEffect, useRef, useState } = pocket;
+    const [up, setUp] = useState(false);
+    const resting = useRef(0);
+    const wasUp = useRef(false);
+
+    useEffect(() => {
+        if (navigator.maxTouchPoints === 0) return;
+
+        const typing = () => document.activeElement?.classList.contains("gt-input") === true;
+
+        const width = { current: window.innerWidth };
+
+        const check = () => {
+            const viewport = window.visualViewport;
+
+            const up = keyboardShown({
+                height: Math.min(window.innerHeight, viewport?.height ?? window.innerHeight),
+                rest: resting.current,
+                viewportHeight: viewport?.height,
+                innerHeight: window.innerHeight,
+                availHeight: globalThis.screen?.availHeight,
+                coarse: globalThis.matchMedia("(pointer: coarse)").matches,
+                typing: typing(),
+                wasUp: wasUp.current,
+            });
+
+            wasUp.current = up;
+            setUp(up);
+        };
+
+        const remember = () => {
+            resting.current = restingHeight(resting.current, {
+                height: window.innerHeight,
+                width: window.innerWidth,
+                lastWidth: width.current,
+                typing: typing(),
+            });
+            width.current = window.innerWidth;
+        };
+
+        const onResize = () => {
+            remember();
+            check();
+        };
+        const onFocusOut = () => setTimeout(check, 0);
+
+        resting.current = window.innerHeight;
+
+        window.addEventListener("resize", onResize);
+        window.visualViewport?.addEventListener("resize", check);
+        document.addEventListener("focusin", check);
+        document.addEventListener("focusout", onFocusOut);
+
+        return () => {
+            window.removeEventListener("resize", onResize);
+            window.visualViewport?.removeEventListener("resize", check);
+            document.removeEventListener("focusin", check);
+            document.removeEventListener("focusout", onFocusOut);
+        };
+    }, []);
+
+    /** Puts the row away because a person did, whatever the window is still measuring. */
+    const away = () => {
+        wasUp.current = false;
+        setUp(false);
+    };
+
+    return [up, away];
+}
+
 /** One pane: a screen of its own, and the keys that go in it, in the share of the page that the tree gives it. */
 function Pane({ paneKey, api, focused, rect }) {
     const { html, useEffect, useRef } = api.pocket;
@@ -155,6 +236,7 @@ function Pane({ paneKey, api, focused, rect }) {
             onState: (state) => api.said(paneKey, state),
             onClose: () => api.ended(paneKey),
             fresh: api.fresh(paneKey),
+            keyboardUp: () => api.keyboardUp(),
         });
 
         api.views.set(paneKey, made);
@@ -184,13 +266,17 @@ function TerminalPage({ pocket, close, setOpen }) {
     const [focused, setFocused] = useState("pane-1");
     const [states, setStates] = useState({});
     const [dismissed, setDismissed] = useState(null);
+    const [keyboard, putRowAway] = useSoftKeyboard(pocket);
     const views = useRef(new Map());
+    const keyboardRef = useRef(false);
     const next = useRef(2);
     // The panes that have had the keys, newest last: a pane that goes gives them back to the one before it.
     const history = useRef(["pane-1"]);
 
     const state = states[focused] ?? {};
     const armed = state.armed ?? {};
+
+    keyboardRef.current = keyboard;
 
     // What a pane can do to the page, kept in one object so that a pane never remounts when the page draws again.
     const api = useRef(null);
@@ -203,6 +289,7 @@ function TerminalPage({ pocket, close, setOpen }) {
             shown: (key) => focusPane(key),
             ended: (key) => closePane(key),
             fresh: (key) => key !== "pane-1",
+            keyboardUp: () => keyboardRef.current,
         };
     }
 
@@ -258,8 +345,18 @@ function TerminalPage({ pocket, close, setOpen }) {
         const key = `pane-${next.current}`;
 
         next.current += 1;
+
+        // The keys leave this pane for the new one, which is not a pane to take them back to.
+        views.current.get(focused)?.releaseKeys();
+
         setTree((current) => splitLeaf(current, focused, direction, key));
         focusPane(key);
+
+        // The pane is drawn after this, so its keys are asked for once it is there: a keyboard that was up stays up
+        // only for an input that is on the page.
+        for (const wait of [0, 60, 200]) {
+            setTimeout(() => views.current.get(key)?.focus(), wait);
+        }
     };
 
     const restart = () => void view()?.restart();
@@ -304,6 +401,8 @@ function TerminalPage({ pocket, close, setOpen }) {
                 if (to !== null) {
                     event.preventDefault();
                     event.stopPropagation();
+
+                    views.current.get(focused)?.releaseKeys();
                     focusPane(to);
                     views.current.get(to)?.focus();
                 }
@@ -315,14 +414,67 @@ function TerminalPage({ pocket, close, setOpen }) {
         return () => window.removeEventListener("keydown", onKey, true);
     }, [tree, focused]);
 
-    const press = (key, text) => (event) => {
-        event.preventDefault();
-        view()?.press(key, text);
+    /**
+     * A key of the row, or a button of the bar, is pressed without taking the focus, so that the keyboard stays up
+     * under it.
+     *
+     * A browser moves the focus to the button that is tapped, and a system that has the keyboard takes the keyboard
+     * away with the focus. So the tap's own action is stopped, on the touch as well as on the press -- which also stops
+     * the click that would have come after it -- and the keys are asked back inside the tap, the one moment when a page
+     * may ask for them.
+     *
+     * The stopping is why the action runs on whichever of the press and the click comes first, once: a tap sends both,
+     * and a key of a keyboard that a person pressed sends only the click.
+     */
+    const keep = (event) => {
+        if (event.cancelable) event.preventDefault();
     };
 
-    const arm = (name) => (event) => {
-        event.preventDefault();
-        view()?.arm(name);
+    // When the last press happened, for the whole page: a click that follows a press belongs to that press, and the page
+    // may well have drawn itself again between the two, which is a new handler with a new memory of its own.
+    const pressedAt = useRef(0);
+
+    const once = (run) => (event) => {
+        keep(event);
+
+        const now = Date.now();
+
+        if (event.type === "click" && now - pressedAt.current < 700) return;
+        if (event.type === "pointerdown") pressedAt.current = now;
+
+        view()?.keepKeys();
+        run();
+        view()?.focus();
+        setTimeout(() => view()?.focus(), 0);
+    };
+
+    /** The bar's own buttons act on the terminal too: a tap on one of them holds the keys rather than leaving them. */
+    const button = (label, title, run, extra = "") => {
+        // One press, one action: the press and the click that may follow it share the one guard.
+        const go = once(run);
+
+        return html`<button class="button gt-small ${extra}" title=${title} onPointerDown=${go} onClick=${go}>
+            ${label}
+        </button>`;
+    };
+
+    const press = (key, text) =>
+        once(() => {
+            view()?.press(key, text);
+        });
+
+    const arm = (name) =>
+        once(() => {
+            view()?.arm(name);
+        });
+
+    // The round Control of the row, and the round key that puts the keyboard away, which asks for nothing back.
+    const ctrl = arm("ctrl");
+
+    const away = (event) => {
+        keep(event);
+        view()?.blur();
+        putRowAway();
     };
 
     const name = state.title || (state.cwd ? state.cwd.split("/").filter(Boolean).at(-1) : "Terminal");
@@ -336,25 +488,13 @@ function TerminalPage({ pocket, close, setOpen }) {
             </div>
             ${state.flash ? html`<span class="gt-flash small muted">${state.flash}</span>` : null}
             <div class="gt-actions">
-                <button
-                    class="button gt-small"
-                    title="A pane to the right (Control+Shift+D)"
-                    onClick=${() => split("row")}
-                >
-                    ◫
-                </button>
-                <button class="button gt-small" title="A pane below (Control+Shift+E)" onClick=${() => split("column")}>
-                    ⬓
-                </button>
-                ${panes > 1
-                    ? html`<button class="button gt-small" title="Close this pane (Control+Shift+X)" onClick=${() => closePane(focused)}>
-                          ✕
-                      </button>`
-                    : null}
-                <button class="button gt-small" title="Smaller text" onClick=${() => view()?.setFont(-1)}>A−</button>
-                <button class="button gt-small" title="Larger text" onClick=${() => view()?.setFont(1)}>A+</button>
-                <button class="button gt-small" onClick=${restart}>New shell</button>
-                <button class="button gt-small" onClick=${end}>End</button>
+                ${button("◫", "A pane to the right (Control+Shift+D)", () => split("row"))}
+                ${button("⬓", "A pane below (Control+Shift+E)", () => split("column"))}
+                ${panes > 1 ? button("✕", "Close this pane (Control+Shift+X)", () => closePane(focused)) : null}
+                ${button("A−", "Smaller text", () => view()?.setFont(-1), "gt-font")}
+                ${button("A+", "Larger text", () => view()?.setFont(1), "gt-font")}
+                ${button("New shell", "", restart, "gt-restart")}
+                ${button("End", "", end, "gt-end")}
             </div>
         </div>
         <div class="gt-panes">
@@ -385,38 +525,36 @@ function TerminalPage({ pocket, close, setOpen }) {
                 : null}
             ${state.notice ? html`<div class="gt-note muted small">${state.notice}</div>` : null}
         </div>
-        ${state.softKeyboard
+        ${keyboard
             ? html`<div class="gt-keys">
                   <button
                       class="gt-key gt-round ${armed.ctrl ? "gt-key-on" : ""}"
                       aria-pressed=${armed.ctrl ? "true" : "false"}
                       title="Control, for the next key"
-                      onPointerDown=${arm("ctrl")}
-                      onClick=${(event) => event.preventDefault()}
+                      onPointerDown=${ctrl}
+                      onClick=${ctrl}
                   >
                       ⌃
                   </button>
                   <div class="gt-keyrow">
-                      ${KEYS.map(
-                          ([label, key, text]) =>
-                              html`<button
+                      ${KEYS.map(([label, key, text]) => {
+                          const run = key === "Shift" || key === "Alt" ? arm(key.toLowerCase()) : press(key, text);
+
+                          return html`<button
                                   class="gt-key ${armed[key.toLowerCase()] && (key === "Shift" || key === "Alt") ? "gt-key-on" : ""}"
                                   title=${label}
-                                  onPointerDown=${key === "Shift" || key === "Alt" ? arm(key.toLowerCase()) : press(key, text)}
-                                  onClick=${(event) => event.preventDefault()}
+                                  onPointerDown=${run}
+                                  onClick=${run}
                               >
                                   ${label}
-                              </button>`,
-                      )}
+                              </button>`;
+                      })}
                   </div>
                   <button
                       class="gt-key gt-round"
                       title="Put the keyboard away"
-                      onPointerDown=${(event) => {
-                          event.preventDefault();
-                          view()?.blur();
-                      }}
-                      onClick=${(event) => event.preventDefault()}
+                      onPointerDown=${away}
+                      onClick=${away}
                   >
                       <${pocket.Icon} path=${KEYBOARD} size=${18} />
                   </button>
@@ -428,28 +566,44 @@ function TerminalPage({ pocket, close, setOpen }) {
 export default function setup(pocket) {
     const { html } = pocket;
 
-    // Whether the page shows: the one key that opens it is the one that puts it away.
+    // Whether the terminal shows: the one key that opens it is the one that puts it away.
     let open = false;
     const setOpen = (value) => {
         open = value;
     };
 
-    function Page() {
-        return html`<${TerminalPage} pocket=${pocket} close=${() => pocket.closePage()} setOpen=${setOpen} />`;
+    function Page({ close }) {
+        return html`<${TerminalPage} pocket=${pocket} close=${close} setOpen=${setOpen} />`;
     }
 
+    // A terminal belongs to the session that it works in, so it docks beside that session's conversation where the
+    // Browser and Files panels dock, and takes a tile in the places. A panel came in 0.19.0: an older app gets the page
+    // and a button on the rail instead.
+    const panels = typeof pocket.panel === "function";
+
     pocket.style("terminal.css");
-    // Esc belongs to the terminal: it leaves an editor's insert mode, and it is half of what a shell's prompt reads.
-    // The page's own close button and Back still close it.
-    pocket.page({ id: "terminal", title: "Terminal", component: Page, escape: false, swipe: false });
-    pocket.rail({ id: "terminal", title: "Terminal", iconPath: PROMPT, page: "terminal" });
-    pocket.launcher({
-        id: "terminal",
-        label: "Terminal",
-        detail: "a shell in this session's folder",
-        iconPath: PROMPT,
-        page: "terminal",
-    });
+
+    if (panels) {
+        pocket.panel({ id: "terminal", title: "Terminal", component: Page, iconPath: PROMPT, wide: true });
+        pocket.launcher({
+            id: "terminal",
+            label: "Terminal",
+            detail: "a shell in this session's folder",
+            iconPath: PROMPT,
+            panel: "terminal",
+        });
+    } else {
+        // Esc belongs to the terminal: it leaves an editor's insert mode, and it is half of what a shell reads.
+        pocket.page({ id: "terminal", title: "Terminal", component: Page, escape: false, swipe: false });
+        pocket.rail({ id: "terminal", title: "Terminal", iconPath: PROMPT, page: "terminal" });
+        pocket.launcher({
+            id: "terminal",
+            label: "Terminal",
+            detail: "a shell in this session's folder",
+            iconPath: PROMPT,
+            page: "terminal",
+        });
+    }
 
     // A terminal that opens and closes on one key is a terminal that is beside the work rather than in the way.
     const onKey = (event) => {
@@ -460,8 +614,14 @@ export default function setup(pocket) {
         event.preventDefault();
         event.stopPropagation();
 
-        if (open) pocket.closePage();
-        else pocket.openPage("terminal");
+        if (!open) {
+            if (panels) pocket.openPanel("terminal");
+            else pocket.openPage("terminal");
+        } else if (panels) {
+            pocket.closePanel();
+        } else {
+            pocket.closePage();
+        }
     };
 
     document.addEventListener("keydown", onKey, true);

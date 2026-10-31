@@ -1,7 +1,7 @@
 # pi-pocket-ghostty
 
 A real terminal in Pi Pocket: a pty in one of your session's folders, parsed by Ghostty's own VT engine
-([`libghostty-vt`](https://github.com/prime-radiant-inc/ts-libghostty)), drawn in the app's page.
+([`libghostty-vt`](https://github.com/prime-radiant-inc/ts-libghostty)), drawn in a panel beside the conversation.
 
 Pi Pocket has no terminal. Its shell commands (`!git status`) and background tasks run without a pty, so a program that
 asks the terminal what it is, moves a cursor, or waits for a keystroke cannot run there. This extension gives those
@@ -25,11 +25,13 @@ It writes:
 | Where                                      | What                                                              |
 | ------------------------------------------ | ----------------------------------------------------------------- |
 | `~/.pi-pocket/extensions/ghostty-terminal.ts`  | the module: routes, events, the terminals                         |
-| `~/.pi-pocket/extensions/ghostty-terminal/`    | the browser module: the page, its screen, its stylesheet          |
+| `~/.pi-pocket/extensions/ghostty-terminal/`    | the browser module: the panel, its screen, its stylesheet         |
 | `~/.pi-pocket/ghostty-terminal/`               | the runtime: `pty-host.ts` and `libghostty-vt`                    |
 
-Then turn it on in **Menu → Extensions → Ghostty terminal**, and open **Terminal** on the rail. Set `PI_POCKET_DATA`
-to install into another data folder.
+Then turn it on in **Menu → Extensions → Ghostty terminal**. It docks beside the conversation where the Browser and
+Files panels dock, and takes a **tile in the places** — a terminal belongs to the session that it works in, not to the
+app — and `Control+Backquote` opens and closes it from anywhere. Set `PI_POCKET_DATA` to install into another data
+folder.
 
 Settings, in Menu → Extensions: the shell to run (empty: your own, with `-l`), the Bun binary, and the runtime folder.
 
@@ -39,7 +41,7 @@ Settings, in Menu → Extensions: the shell to run (empty: your own, with `-l`),
   screen that it last sent, and the routes that the page calls: create, attach, input, resize, scroll, end.
 - `src/pty-host.ts` — the Bun side: `Bun.spawn` with a pty, `Terminal` + `RenderState` from `libghostty-vt`, and a
   frame of the rows that changed, at most one each 16 ms.
-- `src/web/index.js` — the page on the rail, and a launcher action.
+- `src/web/index.js` — the panel, its tile in the places, and a launcher action.
 - `src/web/terminal.js` — the screen: runs of cells painted into rows of spans, the cursor, the wheel for scrollback,
   and a hidden textarea whose keystrokes go to `libghostty-vt`'s key encoder on the server.
 - `src/web/terminal.css` — the look, from the app's theme tokens.
@@ -63,8 +65,8 @@ closing a pane.
 Each pane is a terminal of its own, with a pty of its own at its own size, and there are eight of them at once: the
 module refuses a ninth. A pane that goes gives the keys back to the pane that had them before it, which is the pane it
 was split from: closing a split lands where the person was, and closing again walks back the way that they came.
-Closing the page ends the panes that would show nowhere and keeps the shell of the first: the one a person comes back
-to is the one that was there.
+Closing the panel ends the panes that would show nowhere and keeps the shell of the first: the one a person comes back
+to is the one that was there. So does opening the Browser or Files panel, since a window shows one panel at a time.
 
 ## The font
 
@@ -88,19 +90,26 @@ that is really there. The name it found is in the browser's console (`[ghostty-t
 | `JetBrainsMono NF`            | the same font, under the name that some installs use |
 | `JetBrains Mono NL`, `JetBrains Mono` | the font without the glyphs: ligatures, no icons |
 
-## What the page says, and where
+## What the panel says, and where
 
-A shell that ends well takes its page with it, as a terminal's own window does, and says nothing. A shell that ends any
-other way keeps its page open with what happened — `The shell was interrupted.` after a `^C` and a `^D`, the code
+A shell that ends well takes the panel with it, as a terminal's own window does, and says nothing. A shell that ends any
+other way keeps it open with what happened — `The shell was interrupted.` after a `^C` and a `^D`, the code
 otherwise — a **New shell** button, and a way to put the note away. The note lies over the screen instead of above it,
 because a line taken from a terminal changes the columns and rows of everything in it.
 
 ## A phone's keyboard
 
-A soft keyboard has no Escape and no Control, so the page puts a row above it: a round Control, a band of keys that
+A soft keyboard has no Escape and no Control, so the panel puts a row above it: a round Control, a band of keys that
 scrolls sideways, and a round button that puts the keyboard away. It starts with what a shell and an editor reach for
 first — Escape, Tab, the modifiers, the arrows, Home and End, the page keys — then the characters that a keyboard keeps
 on its second page.
+
+The input that holds the keys sits at the cursor and is one pixel wide, because a phone shows a keyboard for an input
+that it can see and not for one parked off the edge of the page, and its text is 16px because a smaller one makes a phone
+zoom the page in when it takes the focus.
+
+Tapping a key of the row does not take the keys away: the tap's own action is stopped, and the terminal asks for the
+focus back inside the tap, which is the only moment a system that owns the keyboard lets a page ask for it.
 
 The row waits for a soft keyboard. A keyboard either takes a keyboard's worth of height, as this app's viewport setting
 makes it do, or covers the window without resizing it; a Bluetooth keyboard does neither, so with one there is no row.
@@ -136,23 +145,35 @@ Keys are encoded by Ghostty's key encoder on the server, with the modes that Neo
 and the arrow keys are what Neovim asked for. One key is not: a browser keeps **`<C-w>`** for closing a tab, and a page
 cannot take it back. Use `<C-w>` alternatives, or install Pi Pocket as an app, where the window may let it through.
 
+On an iPad, the system owns the **Escape** key: pressing it puts the on-screen keyboard away. The terminal still gets
+the key, and the page asks the keyboard back a moment later, which the system may allow. Two Escapes work whatever the
+system does: the **Esc** key in the row above a soft keyboard, which sends the key without moving the focus, and
+**`Control+[`**, which is Escape to every terminal.
+
 ## What it does not do
 
 - **A terminal ends with the server, or with the extension's next version.** A save of
   `~/.pi-pocket/extensions/ghostty-terminal.ts` starts new shells.
-- **One terminal for each folder.** Opening the page again finds the one you left, with its screen.
+- **One terminal for each folder.** Opening the panel again finds the one you left, with its screen.
 - **No mouse, no images.** Keys and text go in; the screen comes out. Kitty graphics and mouse tracking are not wired,
   so clicking a file name in a full-screen program does nothing.
 - **The shell is the person's own.** A drop-in runs with its owner's rights, and so does anything typed in this page.
-  The page and its routes are for the owner alone; guests and viewers get no route at all.
+  The panel and its routes are for the owner alone; guests and viewers get no route at all.
 
 ## Development
 
 ```bash
-mise run preview     # a page with a real shell at http://127.0.0.1:4711, without Pi Pocket
-mise run test        # the module against a real pty: keys, resize, scroll, ending
-mise run check       # tsc --noEmit
+mise run preview      # a page with a real shell at http://127.0.0.1:4711, without Pi Pocket
+mise run test         # everything: the pty, the module, and the page in a browser
+mise run test:fast    # everything that needs no browser
+mise run check        # typecheck, and parse the browser module as a browser does
 ```
+
+`test/browser.test.ts` drives the page in Chromium with Puppeteer: a tap is a real touch, a soft keyboard is a viewport
+that lost a keyboard's worth of height, and a pane is a real pty. It exists because the page's behaviour — which pane
+has the keys, when the row of keys shows, what a tap does to the focus — cannot be seen from a unit test, and four
+rounds of broken buttons and vanishing rows were four rounds of finding that out by hand. `CHROME_PATH` names the
+browser; the default is the Chromium that Pi Pocket keeps for its own browser panel.
 
 `scripts/preview.ts` serves the module's own routes behind a small HTTP server and gives the page a fake `pocket`, so
 the screen can be tried in a browser before Pi Pocket loads the extension. `test/fake-web.ts` is the same idea for

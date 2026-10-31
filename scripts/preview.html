@@ -113,12 +113,21 @@
                 page(config) {
                     page = config;
                 },
+                panel(config) {
+                    page = config;
+                },
                 rail() {},
                 launcher() {},
                 openPage() {
                     mount();
                 },
                 closePage() {
+                    unmount();
+                },
+                openPanel() {
+                    mount();
+                },
+                closePanel() {
                     unmount();
                 },
                 onDispose() {},
@@ -169,6 +178,8 @@
                 root.textContent = "";
                 render(h(page.component, { close }), root);
             }
+
+            // The app gives a page or a panel its close; the preview has one element, so every close is that one.
 
             function unmount() {
                 render(null, root);
