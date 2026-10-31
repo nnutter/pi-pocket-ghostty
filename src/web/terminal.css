@@ -108,10 +108,25 @@
     min-height: 0;
     overflow: hidden;
 
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    /*
+     * JetBrains Mono with Nerd Font's glyphs, which is what an editor's icons are drawn with, and the ligatures that
+     * its arrows and comparisons are drawn as.
+     *
+     * Pi Pocket has both of its own: "Pocket Mono" is JetBrains Mono, and "Pocket Nerd Symbols" is the icons alone, in
+     * the private use areas and no further. So a person's own font comes first, and a device with none of them still
+     * gets the icons, which is the one thing a font that is only a name cannot promise.
+     */
+    font-family:
+        "JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono Nerd Font Propo", "JetBrainsMono NF",
+        "JetBrainsMonoNF", "JetBrainsMonoNL Nerd Font", "JetBrains Mono Nerd Font", "JetBrains Mono NF",
+        "JetBrains Mono", "Pocket Mono", "Pocket Nerd Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font",
+        ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     font-size: var(--gt-font);
     line-height: var(--gt-line);
-    font-variant-ligatures: none;
+    font-variant-ligatures: common-ligatures contextual;
+    font-feature-settings:
+        "calt" 1,
+        "liga" 1;
     font-kerning: none;
     tab-size: 8;
 

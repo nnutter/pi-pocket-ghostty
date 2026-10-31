@@ -8,6 +8,21 @@
         />
         <title>Ghostty terminal preview</title>
         <style>
+            /* Pi Pocket's own fonts, so that a preview of the page is a preview of what the app draws. */
+            @font-face {
+                font-family: "Pocket Mono";
+                src: url("/fonts/JetBrainsMono.woff2") format("woff2");
+                font-weight: 100 800;
+                font-display: swap;
+            }
+
+            @font-face {
+                font-family: "Pocket Nerd Symbols";
+                src: url("/fonts/NerdFontsSymbolsMono.woff2") format("woff2");
+                font-display: swap;
+                unicode-range: U+E000-F8FF, U+F0000-F1AF0;
+            }
+
             :root {
                 --bg: #1b1f27;
                 --text: #e4e8f1;

@@ -14,6 +14,31 @@ const BLINK = 64;
 const INVERSE = 128;
 const INVISIBLE = 256;
 
+/**
+ * The names that a Nerd Font goes by, in the order to try them: the same font is installed under a name that its build
+ * chose, and a native terminal finds it where a browser does not. The first that this device has is the one to use.
+ */
+const FONT_FAMILIES = [
+    '"JetBrainsMono Nerd Font"',
+    '"JetBrainsMono Nerd Font Mono"',
+    '"JetBrainsMono Nerd Font Propo"',
+    '"JetBrainsMono NF"',
+    '"JetBrainsMonoNF"',
+    '"JetBrainsMonoNL Nerd Font"',
+    '"JetBrains Mono Nerd Font"',
+    '"JetBrains Mono NF"',
+    '"JetBrains Mono Nerd Font Mono"',
+    '"Symbols Nerd Font Mono"',
+    '"Symbols Nerd Font"',
+    '"Hack Nerd Font"',
+    '"FiraCode Nerd Font"',
+    '"MesloLGS NF"',
+    '"JetBrains Mono"',
+    // Pi Pocket's own two: JetBrains Mono, and the icons alone. They are in every tab of the app, so the last resort is
+    // a font with the glyphs rather than whatever monospace a device happens to have.
+    '"Pocket Mono"',
+];
+
 /** The keys that go to the terminal as a key, not as the text that they would write. */
 const KEYS_SENT_AS_KEYS = new Set([
     "ArrowUp",
@@ -111,6 +136,7 @@ export class TerminalView {
     #cursorEl = null;
     #input = null;
     #font = 13;
+    #family = null;
     #cell = { width: 8, height: 17 };
 
     #id = null;
@@ -190,6 +216,12 @@ export class TerminalView {
         this.#grid = grid;
         this.#cursorEl = cursor;
         this.#input = input;
+
+        // The name that the browser has, which a native terminal may know by another one: the page uses that one.
+        this.#family = this.#fontFamily();
+        if (this.#family !== null) screen.style.fontFamily = `${this.#family}, "Pocket Nerd Symbols", ui-monospace, monospace`;
+
+        console.info(`[ghostty-terminal] font: ${this.#family ?? "no Nerd Font found"}`);
 
         this.#listen();
         this.#applyFont();
@@ -469,6 +501,47 @@ export class TerminalView {
         this.#input.focus({ preventScroll: true });
     }
 
+    /**
+     * The first of the names that this browser has, measured against a name that no device has: a family that is not
+     * there falls back to the same font as the name that is not there, and measures the same as it.
+     */
+    #fontFamily() {
+        const width = (family) => {
+            const probe = document.createElement("span");
+
+            probe.className = "gt-probe";
+            probe.style.font = `100px ${family}`;
+            probe.textContent = "MWmw0Oii";
+            this.#screen.append(probe);
+
+            const measured = probe.getBoundingClientRect().width;
+
+            probe.remove();
+
+            return measured;
+        };
+
+        try {
+            const absent = width('"No Such Font 4F2A"');
+
+            for (const family of FONT_FAMILIES) {
+                if (Math.abs(width(family) - absent) > 1) return family;
+            }
+        } catch {
+            // A browser that will not measure: the stylesheet's own list still applies.
+        }
+
+        return null;
+    }
+
+    /**
+     * Says which font the screen draws with. There is nothing to warn about when it found none: the stylesheet's own
+     * list ends with the two fonts that Pi Pocket serves, so the icons are there whatever a device has installed.
+     */
+    #sayFont() {
+        this.#publish({ font: this.#family });
+    }
+
     /** Hands text to the browser's clipboard, as a program asked with OSC 52. */
     async #copy(text) {
         // The copy comes from a program, not from the person's own gesture, and a browser may sit on the question
@@ -644,6 +717,8 @@ export class TerminalView {
 
             this.#stashed.clear();
             this.#input.focus({ preventScroll: true });
+
+            this.#sayFont();
         } catch (error) {
             if (!this.#destroyed) this.#publish({ error: error.message });
         } finally {

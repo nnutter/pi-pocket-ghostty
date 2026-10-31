@@ -186,7 +186,8 @@ function TerminalPage({ pocket, close, setOpen }) {
     const [dismissed, setDismissed] = useState(null);
     const views = useRef(new Map());
     const next = useRef(2);
-    const first = useRef(true);
+    // The panes that have had the keys, newest last: a pane that goes gives them back to the one before it.
+    const history = useRef(["pane-1"]);
 
     const state = states[focused] ?? {};
     const armed = state.armed ?? {};
@@ -199,13 +200,19 @@ function TerminalPage({ pocket, close, setOpen }) {
             pocket,
             views: views.current,
             said: (key, said) => setStates((all) => ({ ...all, [key]: said })),
-            shown: (key) => setFocused(key),
+            shown: (key) => focusPane(key),
             ended: (key) => closePane(key),
             fresh: (key) => key !== "pane-1",
         };
     }
 
     const view = () => views.current.get(focused);
+
+    /** Gives the keys to a pane, and remembers the way back to the one that had them. */
+    const focusPane = (key) => {
+        if (key !== focused) history.current = [...history.current.filter((each) => each !== key), key];
+        setFocused(key);
+    };
 
     const closePane = (key) => {
         const made = views.current.get(key);
@@ -233,10 +240,12 @@ function TerminalPage({ pocket, close, setOpen }) {
             return copy;
         });
 
-        if (key === focused) {
-            const panes = [...rectsOf(left).keys()];
-            setFocused(panes[0] ?? "pane-1");
-        }
+        // The keys go back to the pane that had them before this one, which is the pane that it was split from.
+        const open = new Set(rectsOf(left).keys());
+
+        history.current = history.current.filter((each) => each !== key && open.has(each));
+
+        if (key === focused) setFocused(history.current.at(-1) ?? [...open][0] ?? "pane-1");
     };
 
     const closePaneNow = useRef(closePane);
@@ -250,7 +259,7 @@ function TerminalPage({ pocket, close, setOpen }) {
 
         next.current += 1;
         setTree((current) => splitLeaf(current, focused, direction, key));
-        setFocused(key);
+        focusPane(key);
     };
 
     const restart = () => void view()?.restart();
@@ -295,7 +304,7 @@ function TerminalPage({ pocket, close, setOpen }) {
                 if (to !== null) {
                     event.preventDefault();
                     event.stopPropagation();
-                    setFocused(to);
+                    focusPane(to);
                     views.current.get(to)?.focus();
                 }
             }

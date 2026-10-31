@@ -7,11 +7,20 @@
  *
  * It is a development tool, not part of the extension: what it serves is the module and the browser module themselves.
  */
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { realpathSync } from "node:fs";
 import createGhosttyTerminal from "../src/ghostty-terminal.ts";
 import { fakeWeb, type FakeWeb } from "../test/fake-web.ts";
 
 const root = join(import.meta.dir, "..");
+
+/** Where Pi Pocket keeps its own fonts, found through the link that the drop-in folder has to its packages. */
+const appFonts = join(
+    dirname(realpathSync(join(homedir(), ".pi-pocket", "extensions", "node_modules"))),
+    "web",
+    "fonts",
+);
 const port = Number(process.env.PORT ?? 4711);
 
 const fake: FakeWeb = fakeWeb({
@@ -69,6 +78,15 @@ async function answer(request: Request): Promise<Response> {
         return new Response(stream, {
             headers: { "content-type": "text/event-stream", "cache-control": "no-store" },
         });
+    }
+
+    // Pi Pocket's own fonts, so that the preview draws what the app draws: JetBrains Mono and the Nerd Fonts icons.
+    if (url.pathname.startsWith("/fonts/")) {
+        const file = Bun.file(join(appFonts, url.pathname.slice("/fonts/".length)));
+
+        if (!(await file.exists())) return new Response("not found", { status: 404 });
+
+        return new Response(file, { headers: { "content-type": "font/woff2" } });
     }
 
     if (url.pathname.startsWith("/vendor/")) {

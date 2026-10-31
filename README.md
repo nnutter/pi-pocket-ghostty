@@ -60,8 +60,33 @@ Ghostty's own bindings use Super: `super+d` for a split right, `super+shift+d` f
 between them. A browser keeps Super and `Ctrl+W` for itself, so this page uses Control with Shift, and its own key for
 closing a pane.
 
-Each pane is a terminal of its own, with a pty of its own at its own size. Closing the page ends the panes that would
-show nowhere and keeps the shell of the first: the one a person comes back to is the one that was there.
+Each pane is a terminal of its own, with a pty of its own at its own size, and there are eight of them at once: the
+module refuses a ninth. A pane that goes gives the keys back to the pane that had them before it, which is the pane it
+was split from: closing a split lands where the person was, and closing again walks back the way that they came.
+Closing the page ends the panes that would show nowhere and keeps the shell of the first: the one a person comes back
+to is the one that was there.
+
+## The font
+
+The screen draws with **JetBrains Mono, with Nerd Font's glyphs**, and with the font's ligatures: `->` is an arrow,
+`!=` is a not-equal sign, and a file tree has its icons. Nothing is bundled, because an extension of the gallery may not
+carry a file over 512 KB. On this machine, put the font in `~/.local/share/fonts` and run `fc-cache -f`; a browser that
+was already open needs a restart before it sees a new font.
+
+Pi Pocket has both of those fonts of its own, and the stack ends with them: **`Pocket Mono`** is JetBrains Mono, and
+**`Pocket Nerd Symbols`** is the icons alone, in the private use areas and no further. So a person's own font comes
+first when the browser can see it, and a device that has none still draws a file tree's icons — nothing to install, on a
+phone or a laptop alike.
+
+A native terminal and a browser can know the same font by different names, so the page does not trust the stylesheet
+alone: it measures each name that a Nerd Font goes by against a name that no device has, and draws with the first one
+that is really there. The name it found is in the browser's console (`[ghostty-terminal] font: …`).
+
+| Name in the stack             | Where it comes from                              |
+| ----------------------------- | ------------------------------------------------ |
+| `JetBrainsMono Nerd Font`     | [nerd-fonts](https://github.com/ryanoasis/nerd-fonts) `JetBrainsMono.zip` |
+| `JetBrainsMono NF`            | the same font, under the name that some installs use |
+| `JetBrains Mono NL`, `JetBrains Mono` | the font without the glyphs: ligatures, no icons |
 
 ## What the page says, and where
 
