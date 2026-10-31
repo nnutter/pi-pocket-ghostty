@@ -451,11 +451,44 @@ function TerminalPage({ pocket, close, setOpen }) {
     };
 
     /** The bar's own buttons act on the terminal too: a tap on one of them holds the keys rather than leaving them. */
+    /** An octicon: a 16 by 16 drawing, in one shape or a few, that takes the button's color and the size of its letters. */
+    const icon = (...shapes) =>
+        html`<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+            ${shapes.map((shape) => html`<path d=${shape} />`)}
+        </svg>`;
+
+    // The frame of a box: a square outline whose corners are rounded a little, filled the width of a line of the drawing.
+    const FRAME =
+        "M2.75 1h10.5c.966 0 1.75.784 1.75 1.75v10.5A1.75 1.75 0 0 1 13.25 15H2.75A1.75 1.75 0 0 1 1 13.25V2.75C1 1.784 1.784 1 2.75 1Zm10.5 1.5H2.75a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25V2.75a.25.25 0 0 0-.25-.25Z";
+
+    const PLUS = "M8 4a.75.75 0 0 1 .75.75v2.5h2.5a.75.75 0 0 1 0 1.5h-2.5v2.5a.75.75 0 0 1-1.5 0v-2.5h-2.5a.75.75 0 0 1 0-1.5h2.5v-2.5A.75.75 0 0 1 8 4Z";
+    // A glass with a minus in it, and one with a plus: the letters' size, smaller or larger.
+    const MINUS =
+        "M4.5 6.75h6a.75.75 0 0 1 0 1.5h-6a.75.75 0 0 1 0-1.5Z";
+    const GLASS_UNDER =
+        "M0 7.5a7.5 7.5 0 1 1 13.307 4.747l2.473 2.473a.749.749 0 1 1-1.06 1.06l-2.473-2.473A7.5 7.5 0 0 1 0 7.5Zm7.5-6a6 6 0 1 0 0 12 6 6 0 0 0 0-12Z";
+    const OVER_PLUS =
+        "M3.75 7.5a.75.75 0 0 1 .75-.75h2.25V4.5a.75.75 0 0 1 1.5 0v2.25h2.25a.75.75 0 0 1 0 1.5H8.25v2.25a.75.75 0 0 1-1.5 0V8.25H4.5a.75.75 0 0 1-.75-.75Z";
+    const GLASS_OVER =
+        "M7.5 0a7.5 7.5 0 0 1 5.807 12.247l2.473 2.473a.749.749 0 1 1-1.06 1.06l-2.473-2.473A7.5 7.5 0 1 1 7.5 0Zm-6 7.5a6 6 0 1 0 12 0 6 6 0 0 0-12 0Z";
+
+    // Two panes, and the line that the split makes between them: across, or down.
+    const DOWN = "M7.25 2.25h1.5v11.5h-1.5z";
+    const ACROSS = "M2.25 7.25h11.5v1.5h-11.5z";
+    const END =
+        "M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z";
+
     const button = (label, title, run, extra = "") => {
         // One press, one action: the press and the click that may follow it share the one guard.
         const go = once(run);
 
-        return html`<button class="button gt-small ${extra}" title=${title} onPointerDown=${go} onClick=${go}>
+        return html`<button
+            class="button gt-small ${extra}"
+            title=${title}
+            aria-label=${title === "" ? undefined : title}
+            onPointerDown=${go}
+            onClick=${go}
+        >
             ${label}
         </button>`;
     };
@@ -479,24 +512,23 @@ function TerminalPage({ pocket, close, setOpen }) {
         putRowAway();
     };
 
-    const name = state.title || (state.cwd ? state.cwd.split("/").filter(Boolean).at(-1) : "Terminal");
     const panes = [...rectsOf(tree).keys()].length;
 
     return html`<div class="gt-page">
         <div class="gt-bar">
-            <div class="gt-name" title=${state.cwd ?? ""}>
-                <span class="gt-title">${name}</span>
-                ${state.cwd ? html`<span class="gt-cwd small muted">${state.cwd}</span>` : null}
-            </div>
             ${state.flash ? html`<span class="gt-flash small muted">${state.flash}</span>` : null}
             <div class="gt-actions">
-                ${button("◫", "A pane to the right (Control+Shift+D)", () => split("row"))}
-                ${button("⬓", "A pane below (Control+Shift+E)", () => split("column"))}
-                ${panes > 1 ? button("✕", "Close this pane (Control+Shift+X)", () => closePane(focused)) : null}
-                ${button("A−", "Smaller text", () => view()?.setFont(-1), "gt-font")}
-                ${button("A+", "Larger text", () => view()?.setFont(1), "gt-font")}
-                ${button("New shell", "", restart, "gt-restart")}
-                ${button("End", "", end, "gt-end")}
+                ${button(icon(FRAME, PLUS), "New shell", restart, "gt-restart")}
+                <span class="gt-space"></span>
+                ${button(icon(FRAME, DOWN), "A pane to the right (Control+Shift+D)", () => split("row"), "gt-split")}
+                ${button(icon(FRAME, ACROSS), "A pane below (Control+Shift+E)", () => split("column"), "gt-split")}
+                ${panes > 1 ? button("✕", "Close this pane (Control+Shift+X)", () => closePane(focused), "gt-close") : null}
+            </div>
+            <div class="gt-actions">
+                ${button(icon(MINUS, GLASS_UNDER), "Smaller text", () => view()?.setFont(-1), "gt-font")}
+                ${button(icon(OVER_PLUS, GLASS_OVER), "Larger text", () => view()?.setFont(1), "gt-font")}
+                <span class="gt-space"></span>
+                ${button(icon(END), "End", end, "gt-end")}
             </div>
         </div>
         <div class="gt-panes">

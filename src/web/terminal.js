@@ -419,10 +419,15 @@ export class TerminalView {
         this.#screen.style.setProperty("--gt-cell-h", `${this.#cell.height}px`);
     }
 
-    /** The columns and rows that fit the room that the page has now. */
+    /** The columns and rows that fit the room that the page has now, less the margin inside its frame. */
     #fit() {
-        const cols = Math.floor(this.#screen.clientWidth / this.#cell.width);
-        const rows = Math.floor(this.#screen.clientHeight / this.#cell.height);
+        const style = getComputedStyle(this.#screen);
+        const width =
+            this.#screen.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        const height =
+            this.#screen.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+        const cols = Math.floor(width / this.#cell.width);
+        const rows = Math.floor(height / this.#cell.height);
 
         return {
             cols: Math.max(20, Math.min(400, cols)),

@@ -17,33 +17,20 @@
 .gt-bar {
     display: flex;
     align-items: center;
+    /* The shell's own buttons at one end of the bar, the text's size and the end of it at the other. */
+    justify-content: space-between;
     gap: 0.5rem;
     flex: none;
     min-height: 0;
 }
 
-.gt-name {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-    min-width: 0;
-    flex: 1;
-}
-
-.gt-title {
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.gt-cwd {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    direction: rtl;
-    text-align: left;
-    min-width: 0;
+/*
+ * A button's width of air, where a group of buttons says that it is another kind of thing than the group beside it. The
+ * row's own gap sits on either side of it, so the air it adds is a button less two of those gaps.
+ */
+.gt-space {
+    flex: none;
+    width: calc(1.75rem - 0.5rem);
 }
 
 .gt-flash {
@@ -60,13 +47,43 @@
 
 .gt-actions {
     display: flex;
+    align-items: center;
     gap: 0.25rem;
     flex: none;
 }
 
+/*
+ * A button in the bar is a square, whatever it says: a drawing is the whole of what one of them says, so its width is
+ * its height, and the row of them is even. The size is set rather than left to the drawing inside it, which a font or a
+ * zoom level would change a pixel at a time.
+ */
+.gt-actions .button.gt-small {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+}
+
+/*
+ * An icon is drawn at the size of the letters beside it, in their color: a button says with a drawing what a word would
+ * say, and every button in the bar is the same size, whichever of the two it says it with.
+ */
+.gt-actions svg {
+    display: block;
+    width: 1em;
+    height: 1em;
+    fill: currentColor;
+}
+
+
 .button.gt-small {
-    padding: 0.2rem 0.5rem;
-    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+    /* One size for every button in the bar: a split's drawing, a letter, and an icon are all this big. */
+    font-size: 1rem;
+    /* One line of a box, so that a button with text and a button with a drawing are one height. */
+    line-height: 1;
     min-height: 0;
 }
 
@@ -76,9 +93,10 @@
  */
 .gt-note {
     position: absolute;
-    left: 6px;
-    right: 6px;
-    bottom: 6px;
+    /* Inside the frame's own margin, so that the note is a note on the screen and not on its edge. */
+    left: 9px;
+    right: 9px;
+    bottom: 9px;
     z-index: 3;
 
     display: flex;
@@ -144,7 +162,11 @@
     font-kerning: none;
     tab-size: 8;
 
-    padding: 1px;
+    /*
+     * Room inside the frame: text that begins at the edge of a rounded corner looks cut off by it. A pixel less than the
+     * corner's own radius, on every side, and the columns and rows are counted in what is left.
+     */
+    padding: 9px;
     border: 1px solid var(--line);
     border-radius: 10px;
     background: var(--bg);
@@ -265,14 +287,13 @@
 
 /* A panel that is narrow, in a window that is not, still has to keep its keys and its name. */
 @container (max-width: 620px) {
-    .gt-cwd,
     .gt-flash {
         display: none;
     }
 
     .button.gt-small {
         padding: 0.2rem 0.4rem;
-        font-size: 0.8rem;
+        font-size: 0.9rem;
     }
 
     .gt-bar {
@@ -288,10 +309,6 @@
 }
 
 @media (max-width: 699px) {
-    .gt-cwd {
-        display: none;
-    }
-
     .gt-page {
         height: 100%;
     }

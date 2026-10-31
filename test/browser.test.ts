@@ -79,6 +79,18 @@ async function openPhone(): Promise<Page> {
     return page;
 }
 
+/** A panel in a window wide enough for every button of the bar. */
+async function openWide(): Promise<Page> {
+    const page = await browser.newPage();
+
+    await page.setViewport({ width: 900, height: 700, deviceScaleFactor: 2 });
+    await page.goto(`${URL_BASE}/`, { waitUntil: "networkidle2" });
+    await page.waitForSelector(".gt-pane .gt-row");
+    await settle(page, 400);
+
+    return page;
+}
+
 /** Waits for the page to finish what a tap or a keystroke set going. */
 function settle(page: Page, ms = 250): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -277,7 +289,7 @@ describe("panes", () => {
 
         try {
             await keyboardUp(page);
-            await tap(page, ".gt-actions button");
+            await tap(page, ".gt-split");
 
             expect(await panes(page)).toBe(2);
             expect(await focusedPane(page)).toBe(1);
@@ -320,9 +332,9 @@ describe("panes", () => {
 
         try {
             // Three panes, the third split from the second: p1 | (p2 | p3). A finger on the split button, twice.
-            await tap(page, ".gt-actions button");
+            await tap(page, ".gt-split");
             await settle(page, 1200);
-            await tap(page, ".gt-actions button");
+            await tap(page, ".gt-split");
             await settle(page, 1400);
 
             expect(await panes(page)).toBe(3);
@@ -335,7 +347,8 @@ describe("panes", () => {
                 focused.value = "\u0004";
                 focused.dispatchEvent(new InputEvent("input", { bubbles: true }));
             });
-            await settle(page, 1600);
+            // The pane goes when its shell's end reaches the page: wait for that, not for a guess at how long it takes.
+            await page.waitForFunction(() => document.querySelectorAll(".gt-pane").length === 2, { timeout: 15_000 });
 
             expect(await panes(page)).toBe(2);
             expect(await focusedPane(page)).toBe(1);
@@ -355,10 +368,10 @@ describe("panes", () => {
         const page = await openPhone();
 
         try {
-            await tap(page, ".gt-actions button"); // a pane to the right: two panes, the second has the keys
+            await tap(page, ".gt-split"); // a pane to the right: two panes, the second has the keys
             expect(await focusedPane(page)).toBe(1);
 
-            await tap(page, ".gt-actions button:nth-of-type(3)"); // the third button is the close of a pane
+            await tap(page, ".gt-close"); // the close of a pane, which is there once there is more than one
             await settle(page, 900);
 
             expect(await panes(page)).toBe(1);
@@ -761,6 +774,270 @@ describe("the width of a run", () => {
             });
 
             expect(synthesis.weight).toBe("none");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("the bar above the screen", () => {
+    /** The bar's buttons, by the class that says what they do. */
+    const bar = (page: Page) =>
+        page.$eval(".gt-bar", (element) => {
+            const buttons = [...element.querySelectorAll(".button")] as HTMLElement[];
+            return {
+                words: (element.textContent ?? "").replaceAll("\n", "").trim(),
+                icons: buttons.map((each) => ({
+                    label: each.getAttribute("title") ?? "",
+                    svg: each.querySelector("svg") !== null,
+                })),
+            };
+        });
+
+    test("says nothing about the session, which the page around it already says", async () => {
+        const page = await openPhone();
+
+        try {
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "printf $'\\033]0;pi-pocket-ghostty\\007'\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 700);
+
+            const shown = await page.evaluate(() => ({
+                name: document.querySelector(".gt-bar .gt-name") !== null,
+                folder: document.querySelector(".gt-bar .gt-cwd") !== null,
+                title: document.querySelector(".gt-bar .gt-title") !== null,
+                words: (document.querySelector(".gt-bar")?.textContent ?? "").trim(),
+            }));
+
+            // The title that a shell sets and the folder are the session's, and the page around the panel says them.
+            expect(shown.name).toBe(false);
+            expect(shown.title).toBe(false);
+            expect(shown.folder).toBe(false);
+            expect(shown.words).not.toContain("pi-pocket-ghostty");
+            expect(shown.words).not.toContain("/");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    test("draws every button in the bar at one size", async () => {
+        // A panel wide enough for the whole bar, which is where every button is on the page at once.
+        const page = await openWide();
+
+        try {
+            // A drawing of a box and a letter are the same button: one height, one size of its letters or its icon.
+            const sizes = await page.$eval(".gt-bar", (actions) => {
+                // The text size's buttons fold away in a narrow panel, and a button that is not there has no size.
+                const buttons = ([...actions.querySelectorAll(".button")] as HTMLElement[]).filter(
+                    (each) => each.getClientRects().length > 0,
+                );
+
+                return buttons.map((each) => {
+                    const icon = each.querySelector("svg");
+
+                    const rect = each.getBoundingClientRect();
+
+                    return {
+                        label: each.getAttribute("title") ?? "",
+                        box: Math.round(rect.height * 10) / 10,
+                        width: Math.round(rect.width * 10) / 10,
+                        letters: Number.parseFloat(getComputedStyle(each).fontSize),
+                        icon: icon === null ? null : Math.round(icon.getBoundingClientRect().height * 10) / 10,
+                    };
+                });
+            });
+
+            const boxes = new Set(sizes.map((each) => each.box));
+            const widths = new Set(sizes.map((each) => each.width));
+            const letters = new Set(sizes.map((each) => each.letters));
+
+            // The splits, the two that say what they do with a drawing, and the pane's own close when there is one.
+            expect(sizes.length).toBeGreaterThanOrEqual(4);
+            expect([...boxes]).toHaveLength(1);
+            expect([...widths]).toHaveLength(1);
+            expect([...letters]).toHaveLength(1);
+
+            // An icon is drawn at the size of the letters beside it, which is what makes its button that size too.
+            for (const each of sizes) {
+                if (each.icon !== null) expect(Math.abs(each.icon - each.letters)).toBeLessThan(0.6);
+            }
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    /**
+     * The splits' pictures are drawn, not typed: a glyph brings whatever weight and size its font has, and the two that
+     * the page had were a fill against the octicons' outlines. Each is the frame of a box, a square corner rounded a
+     * little, with the line that the split makes through it.
+     */
+    test("draws both splits as the frame of a box, the size of the other icons", async () => {
+        const page = await openPhone();
+
+        try {
+            const shapes = await page.evaluate(() => {
+                const box = (element: Element) => {
+                    const rect = element.getBoundingClientRect();
+
+                    return { width: Math.round(rect.width * 10) / 10, height: Math.round(rect.height * 10) / 10 };
+                };
+                const splits = [...document.querySelectorAll(".gt-split")].map((button) => ({
+                    glyph: button.querySelector(".gt-glyph") !== null,
+                    icon: button.querySelector("svg") === null ? null : box(button.querySelector("svg")!),
+                    box: box(button),
+                    // Every path of an icon is filled, and the frame is the first: a shape is its outline, not a fill.
+                    paths: [...button.querySelectorAll("path")].map((path) => path.getAttribute("d") ?? ""),
+                }));
+                const icons = [...document.querySelectorAll(".gt-actions .button:not(.gt-split) svg")]
+                    .filter((svg) => svg.getClientRects().length > 0)
+                    .map((svg) => box(svg));
+
+                return { splits, icons };
+            });
+
+            expect(shapes.splits).toHaveLength(2);
+
+            for (const split of shapes.splits) {
+                expect(split.glyph).toBe(false);
+                expect(split.icon).not.toBeNull();
+                // An icon of the same box is an icon of the same size: the ink of both is a pixel inside it.
+                expect(split.icon).toEqual(shapes.icons[0]!);
+                expect(split.paths.length).toBe(2);
+            }
+
+            // One frame with a line across it, and another with a line down it: both the same frame.
+            expect(shapes.splits[0]!.paths[0]).toBe(shapes.splits[1]!.paths[0]);
+            expect(shapes.splits[0]!.paths[1]).not.toBe(shapes.splits[1]!.paths[1]);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    test("keeps the shell's own buttons on the left and the text size on the right", async () => {
+        const page = await openWide();
+
+        try {
+            const row = await page.$eval(".gt-bar", (bar) => {
+                const buttons = [...bar.querySelectorAll(".button")].filter((each) => each.getClientRects().length > 0);
+                const at = (label: string) => {
+                    const button = buttons.find((each) => each.getAttribute("title") === label);
+
+                    return button === undefined ? null : button.getBoundingClientRect();
+                };
+                const gap = (left: string, right: string) => {
+                    const one = at(left);
+                    const other = at(right);
+
+                    return one === null || other === null ? null : Math.round((other.left - one.right) * 10) / 10;
+                };
+
+                return {
+                    order: buttons.map((each) => each.getAttribute("title")),
+                    button: Math.round(buttons[0]!.getBoundingClientRect().width),
+                    afterNewShell: gap("New shell", "A pane to the right (Control+Shift+D)"),
+                    beforeEnd: gap("Larger text", "End"),
+                    endsRight: Math.round(window.innerWidth - at("End")!.right),
+                };
+            });
+
+            // A new shell, a button's width of air, the splits: and on the other side, the text size and the end.
+            expect(row.order[0]).toBe("New shell");
+            expect(row.order.at(-1)).toBe("End");
+            expect(row.afterNewShell).toBeCloseTo(row.button, 0);
+            expect(row.beforeEnd).toBeCloseTo(row.button, 0);
+            // The two groups sit at the two ends of the bar, not gathered at one.
+            expect(row.endsRight).toBeLessThan(20);
+            expect(row.order.indexOf("Smaller text")).toBeGreaterThan(row.order.indexOf("A pane below (Control+Shift+E)"));
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    test("says what every button does with an icon", async () => {
+        // A panel wide enough for the whole bar: a narrow one folds the text size's buttons away.
+        const page = await openWide();
+
+        try {
+            const marked = await page.$$eval(".gt-actions .button", (buttons) =>
+                buttons
+                    .filter((each) => each.getClientRects().length > 0)
+                    .map((each) => ({ label: each.getAttribute("title") ?? "", svg: each.querySelector("svg") !== null })),
+            );
+
+            // A drawing says it in one language, where a word has to be translated or shortened to fit.
+            for (const button of marked) expect(button).toEqual({ label: button.label, svg: true });
+            expect(marked.map((each) => each.label)).toContain("Smaller text");
+            expect(marked.map((each) => each.label)).toContain("Larger text");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("the room inside the frame", () => {
+    /**
+     * A frame with a rounded corner and text that begins at the corner's own edge looks like a page that was cut to fit.
+     * The screen keeps a margin of its own inside its border, and the columns and rows that it asks the pty for are the
+     * ones that fit in that margin: a count that took the padding for room for a column would run under the frame.
+     */
+    test("keeps the screen's text off its frame, and counts only the room that is left", async () => {
+        const page = await openWide();
+
+        try {
+            // A line longer than the terminal is wide: it wraps at the last column, so the row's own end is the edge.
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "clear; printf 'x%.0s' $(seq 1 300)\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 900);
+
+            const room = await page.evaluate(() => {
+                const screen = document.querySelector(".gt-screen") as HTMLElement;
+                const style = getComputedStyle(screen);
+                const frame = screen.getBoundingClientRect();
+                const content = frame.left + Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft);
+                const width =
+                    screen.clientWidth - Number.parseFloat(style.paddingLeft) - Number.parseFloat(style.paddingRight);
+                const right = Math.max(
+                    ...[...document.querySelectorAll(".gt-row > span")].map((span) => span.getBoundingClientRect().right),
+                );
+                const row = document.querySelector(".gt-row") as HTMLElement;
+                const cursor = document.querySelector(".gt-cursor") as HTMLElement;
+
+                return {
+                    padding: [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft].map(
+                        (each) => Math.round(Number.parseFloat(each) * 10) / 10,
+                    ),
+                    radius: Math.round(Number.parseFloat(style.borderTopLeftRadius)),
+                    width: Math.round(width),
+                    cell: Number.parseFloat(style.getPropertyValue("--gt-cell-w")),
+                    // Where the text begins, and how far the row of it reaches, both from the frame's inner edge.
+                    startsAt: Math.round(row.getBoundingClientRect().left - content),
+                    reaches: Math.round(right - content),
+                    cursorAt: Math.round(cursor.getBoundingClientRect().top - frame.top),
+                    top: Math.round(row.getBoundingClientRect().top - frame.top),
+                };
+            });
+
+            // A margin inside the frame, a pixel less than the corner that it runs beside, and the same on every side.
+            expect(new Set(room.padding).size).toBe(1);
+            expect(room.padding[0]!).toBeGreaterThan(4);
+            expect(room.padding[0]!).toBeLessThanOrEqual(room.radius);
+
+            // The text begins at that margin, and the row of it ends inside the margin on its own side.
+            expect(Math.abs(room.startsAt)).toBeLessThanOrEqual(1);
+            expect(room.reaches).toBeLessThanOrEqual(room.width + 1);
+            expect(room.reaches).toBeGreaterThan(room.width - room.cell * 2);
+            expect(room.top).toBeGreaterThanOrEqual(room.padding[0]! - 1);
+            expect(room.cursorAt).toBeGreaterThanOrEqual(room.padding[0]! - 1);
         } finally {
             await page.close();
         }
