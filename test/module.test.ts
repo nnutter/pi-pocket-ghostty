@@ -27,7 +27,7 @@ function module(
         })),
     });
 
-    createGhosttyTerminal(null, fake.web);
+    createGhosttyTerminal(fake.host as never, fake.web);
     made.push(fake);
 
     return fake;
@@ -122,7 +122,7 @@ test("resizes the pty to the columns and rows that the page gives", async () => 
     expect(listing.terminals[0]).toMatchObject({ cols: 100, rows: 30 });
 });
 
-test("keeps one terminal for a folder, and another for another folder", async () => {
+test("keeps one terminal for a session, and another for another session", async () => {
     const fake = module({
         sessions: [
             { id: 7, cwd: root },
@@ -148,6 +148,108 @@ test("keeps one terminal for a folder, and another for another folder", async ()
 
     expect(again.terminal.id).toBe(first.terminal.id);
     expect(other.terminal.id).not.toBe(first.terminal.id);
+});
+
+test("keeps a terminal for each session, though their folders are the same", async () => {
+    const fake = module({
+        sessions: [
+            { id: 7, cwd: root },
+            { id: 8, cwd: root, title: "Another" },
+        ],
+    });
+
+    const first = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 7, cols: 60, rows: 12 },
+    });
+    const other = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 8, cols: 60, rows: 12 },
+    });
+    const again = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 7, cols: 60, rows: 12 },
+    });
+
+    // A shell works in one session: another session in the same folder is another shell, and its own goes with it.
+    expect(other.terminal.id).not.toBe(first.terminal.id);
+    expect(again.terminal.id).toBe(first.terminal.id);
+});
+
+test("ends the shells of a session that is archived, and only that session's", async () => {
+    const fake = module({
+        sessions: [
+            { id: 7, cwd: root },
+            { id: 8, cwd: root, title: "Another" },
+        ],
+    });
+
+    const archived = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 7, cols: 60, rows: 12 },
+    });
+    const kept = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 8, cols: 60, rows: 12 },
+    });
+
+    await screenShows(fake, "$");
+
+    fake.emit("session.archived", { conversationId: 7, archived: true });
+
+    // The shell ends, and its page hears how: a person archived the session, and the shell goes with it.
+    const ended = await fake.waitFor<{ id: string }>("exit", ({ id }) => id === archived.terminal.id, 10_000);
+
+    expect(ended.id).toBe(archived.terminal.id);
+
+    const listed = await fake.call<{ terminals: Array<{ id: string }> }>({ method: "GET", path: "terminals" });
+
+    expect(listed.terminals.map((each) => each.id)).toEqual([kept.terminal.id]);
+});
+
+test("ends a shell of a session that was archived while the module was not listening", async () => {
+    const fake = module();
+
+    const opened = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 7, cols: 60, rows: 12 },
+    });
+
+    await screenShows(fake, "$");
+
+    // The session was archived, and no event reached this module: the session list is what the routes read.
+    fake.sessions[0]!.archived = true;
+
+    const listed = await fake.call<{ terminals: Array<{ id: string }> }>({ method: "GET", path: "terminals" });
+
+    expect(listed.terminals).toEqual([]);
+
+    await fake.waitFor<{ id: string }>("exit", ({ id }) => id === opened.terminal.id, 10_000);
+});
+
+test("starts no shell for a session that is archived, unless the page asks for one", async () => {
+    const fake = module({ sessions: [{ id: 7, cwd: root }] });
+
+    fake.sessions[0]!.archived = true;
+
+    const refused = fake.call({ method: "POST", path: "terminals", body: { conversation: 7, cols: 60, rows: 12 } });
+
+    await expect(refused).rejects.toThrow(/archived/);
+
+    // A person who wants a shell in an archived session says so with the panel's own button.
+    const asked = await fake.call<{ terminal: { id: string } }>({
+        method: "POST",
+        path: "terminals",
+        body: { conversation: 7, new: true, cols: 60, rows: 12 },
+    });
+
+    expect(asked.terminal.id).toBeString();
 });
 
 test("shows the whole screen to a page that opens on a running terminal", async () => {

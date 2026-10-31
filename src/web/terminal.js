@@ -638,7 +638,8 @@ export class TerminalView {
     }
 
     /** Opens the terminal for the session that the tab shows, or takes the one that the folder already has. */
-    async open() {
+    /** Opens this pane's shell: the one that the session keeps, or, asked, a new one. */
+    async open(asNew = false) {
         if (this.#opening) return;
 
         this.#opening = true;
@@ -694,7 +695,7 @@ export class TerminalView {
                 // No session, no folder: the terminal starts in the person's home, as a new shell would.
                 conversation: this.#pocket.conversationId() ?? undefined,
                 // A pane beside another one has a shell of its own, even in the same folder.
-                ...(this.#fresh ? { new: true } : {}),
+                ...(this.#fresh || asNew ? { new: true } : {}),
                 ...this.#fit(),
             }, { method: "POST" });
 
@@ -772,7 +773,8 @@ export class TerminalView {
         this.#grid.querySelectorAll(".gt-row").forEach((row) => row.remove());
         this.#publish({ alive: true, exitCode: null, notice: null, error: null });
 
-        await this.open();
+        // A new shell is the shell that a person asked for: an archived session keeps none of its own.
+        await this.open(true);
     }
 
     /** Ends the shell and leaves the screen as it is. */

@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
-import type { Web, WebRequest, WebSession } from "./_pocket.d.ts";
+import type { Host, Web, WebRequest, WebSession } from "./_pocket.d.ts";
 
 /**
  * A piece of a row that shares a look: `[text, foreground, background, flags, columns]`. An empty color is the default,
@@ -38,6 +38,8 @@ interface Frame {
 /** One terminal: its process, and the screen as it was after the last frame. */
 interface Terminal {
     id: string;
+    /** The session that this shell works in, and 0 for one that the page opened with no session at all. */
+    conversation: number;
     cwd: string;
     argv: string[];
     cols: number;
@@ -65,7 +67,7 @@ const KEEP_ENDED_MS = 15 * 60_000;
 const KEPT_ENV =
     /^(PATH|HOME|USER|LOGNAME|SHELL|LANG|LANGUAGE|TERM|TMPDIR|TZ|EDITOR|VISUAL|PAGER|MANPAGER|SSH_AUTH_SOCK|DISPLAY|WAYLAND_DISPLAY|XDG_[A-Z_]+|LC_[A-Z]+|GIT_[A-Z_]+|COLORTERM|NO_COLOR|FORCE_COLOR)$/;
 
-export default function createGhosttyTerminal(_host: unknown, web: Web) {
+export default function createGhosttyTerminal(_host: Host | null, web: Web) {
     const terminals = new Map<string, Terminal>();
 
     if (typeof web.settings === "function") {
@@ -241,7 +243,7 @@ export default function createGhosttyTerminal(_host: unknown, web: Web) {
     }
 
     /** Starts the runner for one terminal and gives it the pty. */
-    function start(cwd: string, cols: number, rows: number): Terminal {
+    function start(conversation: number, cwd: string, cols: number, rows: number): Terminal {
         const bun = findBun();
         const runner = join(runtimeDir(), "pty-host.ts");
 
@@ -267,6 +269,7 @@ export default function createGhosttyTerminal(_host: unknown, web: Web) {
 
         const terminal: Terminal = {
             id: randomUUID(),
+            conversation,
             cwd,
             argv: shell(),
             cols,
@@ -328,6 +331,36 @@ export default function createGhosttyTerminal(_host: unknown, web: Web) {
         return terminal;
     }
 
+    /**
+     * Ends the shells of a session that is archived: an archived session has nowhere to show a terminal, so a shell that
+     * nobody can see does not keep running. Everyone who saw the session sees its shell end, since the session did.
+     */
+    function close(conversation: number): void {
+        for (const terminal of [...terminals.values()]) {
+            if (terminal.conversation !== conversation) continue;
+
+            // The terminal leaves the list as it is told to end, and its process says how it went: the page hears an
+            // `exit` with the signal, as it does when a shell ends by itself.
+            write(terminal, { op: "kill" });
+            terminals.delete(terminal.id);
+            terminal.proc.kill();
+        }
+    }
+
+    /** Ends the shells of the sessions that this person sees as archived, for an archive that this module did not hear. */
+    function closeArchived(sessions: readonly WebSession[]): void {
+        for (const session of sessions) {
+            if (session.archived) close(session.id);
+        }
+    }
+
+    // Pi Pocket sends this after the archive is stored. An older server sends none, and the routes' own check covers it.
+    const stop = _host?.on?.("session.archived", ({ conversationId, archived }) => {
+        if (archived) close(conversationId);
+    });
+
+    if (typeof stop === "function") web.onDispose(stop);
+
     /** The terminal that a path names, or the 404 that a page cannot tell from a route that is not there. */
     function find(request: WebRequest): Terminal {
         const terminal = terminals.get(request.params.id ?? "");
@@ -344,34 +377,53 @@ export default function createGhosttyTerminal(_host: unknown, web: Web) {
         return Number.isFinite(number) && number >= least && number <= most ? number : fallback;
     }
 
-    /** The folder that a terminal starts in: the session's, when the page names one that its person can see. */
-    function folderOf(sessions: readonly WebSession[], conversation: unknown): string {
+    /**
+     * The session that a terminal belongs to, when the page names one that its person can see. A terminal is the session's:
+     * two sessions in one folder are two shells, and closing a session closes its own.
+     */
+    function sessionOf(sessions: readonly WebSession[], conversation: unknown): WebSession | null {
         const wanted = Number(conversation);
 
-        if (!Number.isFinite(wanted)) return homedir();
+        if (!Number.isFinite(wanted)) return null;
 
         const session = sessions.find((each) => each.id === wanted);
 
         if (session === undefined) throw web.error(403, "That session is not yours to see");
 
-        return session.cwd;
+        return session;
     }
 
-    web.route("GET", "terminals", () => ({
-        terminals: [...terminals.values()].map(summary),
-        bun: findBun() !== null,
-        runner: existsSync(join(runtimeDir(), "pty-host.ts")),
-    }));
+    web.route("GET", "terminals", (request) => {
+        closeArchived(request.sessions());
+
+        return {
+            terminals: [...terminals.values()].map(summary),
+            bun: findBun() !== null,
+            runner: existsSync(join(runtimeDir(), "pty-host.ts")),
+        };
+    });
 
     web.route("POST", "terminals", (request) => {
-        const cwd = folderOf(request.sessions(), request.body.conversation);
+        const session = sessionOf(request.sessions(), request.body.conversation);
+        const cwd = session?.cwd ?? homedir();
+
+        closeArchived(request.sessions());
+
+        // An archived session holds no terminal of its own: a person who wants one there asks for it by name.
+        if (session?.archived === true && request.body.new !== true) {
+            throw web.error(409, "That session is archived. New shell starts one anyway.");
+        }
         const cols = size(request.body.cols, 20, 400, 80);
         const rows = size(request.body.rows, 5, 200, 24);
 
-        // One terminal for each folder: the page that reopens finds the one that it left. A second pane of the same
-        // folder asks for a shell of its own, and gets one.
+        // One terminal for each session: the page that reopens finds the one that it left. A second pane of the same
+        // session asks for a shell of its own, and gets one.
         const existing =
-            request.body.new === true ? undefined : [...terminals.values()].find((each) => each.alive && each.cwd === cwd);
+            request.body.new === true
+                ? undefined
+                : [...terminals.values()].find(
+                      (each) => each.alive && each.conversation === (session?.id ?? 0) && each.cwd === cwd,
+                  );
 
         if (existing !== undefined) {
             if (existing.cols !== cols || existing.rows !== rows) {
@@ -389,7 +441,7 @@ export default function createGhosttyTerminal(_host: unknown, web: Web) {
             throw web.error(429, `That is ${MAX_TERMINALS} terminals at once. End one first.`);
         }
 
-        const terminal = start(cwd, cols, rows);
+        const terminal = start(session?.id ?? 0, cwd, cols, rows);
 
         terminals.set(terminal.id, terminal);
 

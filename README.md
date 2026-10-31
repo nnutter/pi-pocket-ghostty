@@ -160,7 +160,10 @@ system does: the **Esc** key in the row above a soft keyboard, which sends the k
 
 - **A terminal ends with the server, or with the extension's next version.** A save of
   `~/.pi-pocket/extensions/ghostty-terminal.ts` starts new shells.
-- **One terminal for each folder.** Opening the panel again finds the one you left, with its screen.
+- **One terminal for each session.** Opening the panel again finds the shell you left, with its screen. Two sessions
+  in the same folder are two shells.
+- **A session's shell goes with it.** Archiving a session ends its shells, for everyone who saw it. An archived session
+  starts none of its own; **New shell** starts one there if you want it.
 - **No mouse, no images.** Keys and text go in; the screen comes out. Kitty graphics and mouse tracking are not wired,
   so clicking a file name in a full-screen program does nothing.
 - **The shell is the person's own.** A drop-in runs with its owner's rights, and so does anything typed in this page.

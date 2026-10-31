@@ -28,6 +28,16 @@ export interface Call {
 
 export interface FakeWeb {
     web: Web;
+    /**
+     * Enough of `Host` for a test: the events that the app sends (`host.on`), and `emit` to send one as the app does.
+     */
+    host: {
+        on(event: string, listener: (data: never) => unknown): () => void;
+    };
+    /** Sends an app event to the module, as Pi Pocket does after the change is stored. */
+    emit(event: string, data: unknown): void;
+    /** The sessions that `sessions()` gives the module: a test changes it as the app would. */
+    sessions: Session[];
     sent: Sent[];
     routes: string[];
     clients: string[];
@@ -49,6 +59,8 @@ export function fakeWeb(options: { settings?: Record<string, string | number | b
     const settings: unknown[] = [];
     const dispose: Array<() => unknown> = [];
     const state: { disposed: boolean } = { disposed: false };
+    const sessions: Session[] = [...(options.sessions ?? [])];
+    const listeners = new Map<string, Set<(data: never) => unknown>>();
     const waiting: Array<{ event: string; matches?: (data: unknown) => boolean; resolve: (data: unknown) => void }> = [];
 
     const web = {
@@ -108,7 +120,7 @@ export function fakeWeb(options: { settings?: Record<string, string | number | b
             body: request.body ?? {},
             user: PERSON,
             signal: new AbortController().signal,
-            sessions: () => options.sessions ?? [],
+            sessions: () => sessions,
         })) as T;
     }
 
@@ -141,8 +153,26 @@ export function fakeWeb(options: { settings?: Record<string, string | number | b
         });
     }
 
+    const host = {
+        on(event: string, listener: (data: never) => unknown) {
+            const set = listeners.get(event) ?? new Set();
+
+            set.add(listener);
+            listeners.set(event, set);
+
+            return () => set.delete(listener);
+        },
+    };
+
+    function emit(event: string, data: unknown): void {
+        for (const listener of [...(listeners.get(event) ?? [])]) listener(data as never);
+    }
+
     return {
         web,
+        host,
+        emit,
+        sessions,
         sent,
         routes,
         clients,
