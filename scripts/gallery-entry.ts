@@ -3,8 +3,10 @@
  * SHA-256 at the commit the entry pins. Pi Pocket installs nothing when one of them is not what the entry says.
  *
  *     bun run scripts/gallery-entry.ts          # for HEAD, which is the commit that goes out
+ *     bun run scripts/gallery-entry.ts <commit> # for the commit that holds these files
  *
- * Run it on the commit that you deploy, then commit the entry.
+ * Run it on the commit that you deploy, then commit the entry. A commit id given here is for an entry that is committed
+ * after the files: the entry cannot name the commit that holds it.
  */
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -21,7 +23,7 @@ export const FILES = [
 ];
 
 export const commit = (): string =>
-    Bun.spawnSync(["git", "rev-parse", "HEAD"], { cwd: root }).stdout.toString().trim();
+    Bun.spawnSync(["git", "rev-parse", process.argv[2] ?? "HEAD"], { cwd: root }).stdout.toString().trim();
 
 /** What the module installs, as Menu → Extensions shows it. Its routes are the ones it registers. */
 const module = readFileSync(join(root, "extensions", FILES[0]!), "utf8");
