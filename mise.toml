@@ -1,0 +1,18 @@
+[tools]
+bun = "latest"
+
+[tasks."ext:install"]
+description = "Copy the extension into ~/.pi-pocket and install its runtime"
+run = "bun run scripts/install.ts"
+
+[tasks.preview]
+description = "Serve the terminal's page with a real shell, without Pi Pocket"
+run = "bun run scripts/preview.ts"
+
+[tasks.test]
+description = "Run the tests against a real pty"
+run = "bun test"
+
+[tasks.check]
+description = "Typecheck"
+run = "bun x tsc --noEmit"
