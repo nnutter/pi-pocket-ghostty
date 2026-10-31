@@ -75,14 +75,20 @@ The screen draws with **JetBrains Mono, with Nerd Font's glyphs**, and with the 
 carry a file over 512 KB. On this machine, put the font in `~/.local/share/fonts` and run `fc-cache -f`; a browser that
 was already open needs a restart before it sees a new font.
 
-Pi Pocket has both of those fonts of its own, and the stack ends with them: **`Pocket Mono`** is JetBrains Mono, and
-**`Pocket Nerd Symbols`** is the icons alone, in the private use areas and no further. So a person's own font comes
-first when the browser can see it, and a device that has none still draws a file tree's icons — nothing to install, on a
-phone or a laptop alike.
+The stack leads with the two fonts that Pi Pocket serves, because the page was drawn to look like them: **`Pocket
+Mono`** is JetBrains Mono, and **`Pocket Nerd Symbols`** is the icons alone, in the private use areas and no further.
+Every tab of the app has both, so the terminal looks the same on a laptop, a phone, and a machine with nothing
+installed. A person's own Nerd font is one line away — put its name above `"Pocket Mono"` in `terminal.css` — and it
+then draws the text, with the icons still coming from `Pocket Nerd Symbols`.
 
-A native terminal and a browser can know the same font by different names, so the page does not trust the stylesheet
-alone: it measures each name that a Nerd Font goes by against a name that no device has, and draws with the first one
-that is really there. The name it found is in the browser's console (`[ghostty-terminal] font: …`).
+What each of them has, measured per glyph: `Pocket Mono` carries what JetBrains Mono ships itself — powerline arrows
+(`U+E0B0`), box drawing (`U+2500`), blocks (`U+2588`) — and no editor icons at all. The Nerd patch's icons are only in
+`Pocket Nerd Symbols`: Font Awesome (`U+F121`, `U+F07B`), Material (`U+EA71`), Devicons (`U+E702`), Octicons
+(`U+F408`). It is one weight, which is one more reason that no weight is ever made up.
+
+An older version of this page measured the names that a Nerd Font goes by, since a native terminal and a browser can know
+the same font by different names. That went with the version that made Pi Pocket's own font the first choice: there is
+nothing to find when the font is in every tab.
 
 | Name in the stack             | Where it comes from                              |
 | ----------------------------- | ------------------------------------------------ |

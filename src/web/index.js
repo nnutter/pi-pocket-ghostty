@@ -269,6 +269,9 @@ function TerminalPage({ pocket, close, setOpen }) {
     const [keyboard, putRowAway] = useSoftKeyboard(pocket);
     const views = useRef(new Map());
     const keyboardRef = useRef(false);
+    // The pane that closes a pane, through a ref: a pane's own end is asked of the tree that a person has now, and not
+    // of the tree that the first drawing of the page was made with.
+    const closePaneNow = useRef(null);
     const next = useRef(2);
     // The panes that have had the keys, newest last: a pane that goes gives them back to the one before it.
     const history = useRef(["pane-1"]);
@@ -287,7 +290,7 @@ function TerminalPage({ pocket, close, setOpen }) {
             views: views.current,
             said: (key, said) => setStates((all) => ({ ...all, [key]: said })),
             shown: (key) => focusPane(key),
-            ended: (key) => closePane(key),
+            ended: (key) => closePaneNow.current?.(key),
             fresh: (key) => key !== "pane-1",
             keyboardUp: () => keyboardRef.current,
         };
@@ -335,7 +338,6 @@ function TerminalPage({ pocket, close, setOpen }) {
         if (key === focused) setFocused(history.current.at(-1) ?? [...open][0] ?? "pane-1");
     };
 
-    const closePaneNow = useRef(closePane);
 
     closePaneNow.current = closePane;
 

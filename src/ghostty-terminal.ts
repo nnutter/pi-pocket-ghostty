@@ -13,8 +13,11 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { Web, WebRequest, WebSession } from "./_pocket.d.ts";
 
-/** A piece of a row that shares a look: `[text, foreground, background, flags]`. An empty color is the default. */
-type Run = [text: string, fg: string, bg: string, flags: number];
+/**
+ * A piece of a row that shares a look: `[text, foreground, background, flags, columns]`. An empty color is the default,
+ * and `columns` is how many cells the text covers.
+ */
+type Run = [text: string, fg: string, bg: string, flags: number, columns: number];
 
 /** The cursor as the running program asked for it: DECSCUSR's shape, and whether it blinks. */
 type CursorShape = "block" | "underline" | "bar";

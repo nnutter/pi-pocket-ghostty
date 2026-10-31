@@ -115,17 +115,28 @@
      * JetBrains Mono with Nerd Font's glyphs, which is what an editor's icons are drawn with, and the ligatures that
      * its arrows and comparisons are drawn as.
      *
-     * Pi Pocket has both of its own: "Pocket Mono" is JetBrains Mono, and "Pocket Nerd Symbols" is the icons alone, in
-     * the private use areas and no further. So a person's own font comes first, and a device with none of them still
-     * gets the icons, which is the one thing a font that is only a name cannot promise.
+     * The two fonts that Pi Pocket serves come first, and they are the ones this page was drawn to look like: "Pocket
+     * Mono" is JetBrains Mono, and "Pocket Nerd Symbols" is the Nerd patch's icons alone, in the private use areas and
+     * no further. Every tab of the app has both, so the terminal looks the same on a laptop, a phone, and a machine with
+     * nothing installed -- and a person's own Nerd font is a line away, below, if they want their own glyphs back.
+     *
+     * The proportional builds are not here at all, and the Mono ones lead their group: a grid of cells wants a font
+     * whose every glyph is one cell wide.
      */
     font-family:
-        "JetBrainsMono Nerd Font", "JetBrainsMono Nerd Font Mono", "JetBrainsMono Nerd Font Propo", "JetBrainsMono NF",
-        "JetBrainsMonoNF", "JetBrainsMonoNL Nerd Font", "JetBrains Mono Nerd Font", "JetBrains Mono NF",
-        "JetBrains Mono", "Pocket Mono", "Pocket Nerd Symbols", "Symbols Nerd Font Mono", "Symbols Nerd Font",
+        "Pocket Mono", "Pocket Nerd Symbols", "JetBrainsMono Nerd Font Mono", "JetBrainsMono Nerd Font",
+        "JetBrainsMono NF", "JetBrainsMonoNF", "JetBrainsMonoNL Nerd Font", "JetBrains Mono Nerd Font",
+        "JetBrains Mono NF", "JetBrains Mono", "Symbols Nerd Font Mono", "Symbols Nerd Font",
         ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     font-size: var(--gt-font);
     line-height: var(--gt-line);
+    /*
+     * A font that has no bold is given one by the browser, which draws it by thickening the letters, and a thickened
+     * letter is wider than the cell that the terminal counted: the run spills into the run after it and the line looks
+     * like words on top of each other. So a weight is never made up. A slant may be: a made-up italic leans the letter
+     * and leaves its width alone.
+     */
+    font-synthesis-weight: none;
     font-variant-ligatures: common-ligatures contextual;
     font-feature-settings:
         "calt" 1,

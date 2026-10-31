@@ -315,6 +315,42 @@ describe("panes", () => {
         }
     }, 30_000);
 
+    test("a shell that ends in the third pane leaves the other two", async () => {
+        const page = await openPhone();
+
+        try {
+            // Three panes, the third split from the second: p1 | (p2 | p3). A finger on the split button, twice.
+            await tap(page, ".gt-actions button");
+            await settle(page, 1200);
+            await tap(page, ".gt-actions button");
+            await settle(page, 1400);
+
+            expect(await panes(page)).toBe(3);
+
+            // A shell ends in the third pane, as a person's does with Control+D.
+            await page.evaluate(() => {
+                const focused = document.querySelector(".gt-pane.is-focused .gt-input") as HTMLTextAreaElement;
+
+                focused.focus();
+                focused.value = "\u0004";
+                focused.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 1600);
+
+            expect(await panes(page)).toBe(2);
+            expect(await focusedPane(page)).toBe(1);
+
+            // And the panes that are left still answer: two shells, two prompts.
+            const prompts = await page.$$eval(".gt-pane", (all) =>
+                all.filter((pane) => (pane.querySelector(".gt-screen")?.textContent ?? "").includes("❯")).length,
+            );
+
+            expect(prompts).toBe(2);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
     test("closing a pane gives the keys back to the pane it was split from", async () => {
         const page = await openPhone();
 
@@ -327,6 +363,404 @@ describe("panes", () => {
 
             expect(await panes(page)).toBe(1);
             expect(await focusedPane(page)).toBe(0);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("where the cursor sits", () => {
+    /**
+     * The cursor is drawn at the terminal's column, and the text is drawn by a font. If a glyph takes more room than the
+     * cell that the terminal counted for it, the text runs past the cursor and a person sees a cursor that is not where
+     * the next letter goes. The cursor may be a little ahead of the ink -- a line's last blanks are trimmed -- but the
+     * ink must never pass it.
+     */
+    const where = (page: Page) =>
+        page.evaluate(() => {
+            const screenEl = document.querySelector(".gt-screen") as HTMLElement;
+            const screen = screenEl.getBoundingClientRect();
+            const cursor = (document.querySelector(".gt-cursor") as HTMLElement).getBoundingClientRect();
+            const cellW = Number.parseFloat(getComputedStyle(screenEl).getPropertyValue("--gt-cell-w"));
+            const rows = [...document.querySelectorAll(".gt-row")] as HTMLElement[];
+            const top = cursor.top - screen.top;
+            const row = rows.find((each) => Math.abs(each.getBoundingClientRect().top - screen.top - top) < 2);
+
+            if (row === undefined) return null;
+
+            const spans = [...row.children] as HTMLElement[];
+            const ink = spans.length === 0 ? row.getBoundingClientRect().left : spans[spans.length - 1]!.getBoundingClientRect().right;
+
+            return { cells: (cursor.left - ink) / cellW, text: row.textContent ?? "" };
+        });
+
+    /** How far the ink may be behind the cursor: the trailing blanks of a line, and no more. */
+    const holdsTheLine = (found: { cells: number } | null) => {
+        expect(found).not.toBeNull();
+        expect(found!.cells).toBeGreaterThan(-0.2);
+        expect(found!.cells).toBeLessThan(6);
+    };
+
+    test("after a prompt of the shape a shell draws", async () => {
+        const page = await openPhone();
+
+        try {
+            // The shell's own prompt, drawn where there is nothing else on the line: a name, a branch in italics, an
+            // editor's glyph and the prompt's arrow, which is what a person's line looks like.
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value =
+                    "clear; printf 'tom on \\033[3mcall-graphs:master\\033[0m \\uea71 \\u276f '; sleep 2\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 900);
+
+            holdsTheLine(await where(page));
+        } finally {
+            await page.close();
+        }
+    });
+
+    test("after a typed line", async () => {
+        const page = await openPhone();
+
+        try {
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "abcdefghijklmnopqrst";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 700);
+
+            holdsTheLine(await where(page));
+        } finally {
+            await page.close();
+        }
+    });
+
+    test("after a line of an editor's glyphs", async () => {
+        const page = await openPhone();
+
+        try {
+            // A tree as a shell draws one with an icon font: the glyphs that a cell grid has to count like any other.
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "printf '\\ue0b0\\uf121\\uf07b\\ue0b0\\uf121\\uf07b'; sleep 2\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 900);
+
+            holdsTheLine(await where(page));
+        } finally {
+            await page.close();
+        }
+    });
+
+    test("after a line of wide glyphs", async () => {
+        const page = await openPhone();
+
+        try {
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                input.value = "printf '你好世界你好世界'; sleep 2\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 900);
+
+            holdsTheLine(await where(page));
+        } finally {
+            await page.close();
+        }
+    });
+
+    /**
+     * The case that a person sees as "the letters go in the right place and the cursor is somewhere else": a font whose
+     * glyphs are not one cell wide, which is what a proportional build of a Nerd font is. The page draws each run in the
+     * cells that the terminal gave it, so the text cannot walk away from the cursor.
+     */
+    test("after a line drawn in a font that is not a grid", async () => {
+        const page = await openPhone();
+
+        try {
+            await page.$eval(".gt-screen", (screen) => {
+                (screen as HTMLElement).style.fontFamily = "Georgia, serif";
+            });
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+                input.focus();
+                // The widest letter there is, in a font that gives each glyph its own width.
+                input.value = "printf 'WWWWWWWWWW'; sleep 2\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await settle(page, 900);
+
+            holdsTheLine(await where(page));
+        } finally {
+            await page.close();
+        }
+    });
+});
+
+describe("the font the screen draws with", () => {
+    /**
+     * Pi Pocket serves JetBrains Mono as "Pocket Mono" and the Nerd patch's icons as "Pocket Nerd Symbols", and both
+     * are in every tab: a terminal that draws with them looks the same on a laptop, a phone and a machine with nothing
+     * installed. The text font comes first in the stack, and the icons font beside it for the private use areas.
+     */
+    test("is Pocket Mono, with the icons of the symbols font beside it", async () => {
+        const page = await openPhone();
+
+        try {
+            const declared = await page.$eval(".gt-screen", (screen) => getComputedStyle(screen).fontFamily);
+
+            expect(declared.replaceAll("'", '"')).toStartWith('"Pocket Mono"');
+            expect(declared).toContain("Pocket Nerd Symbols");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    test("draws an editor's icon, which is not in the text font at all", async () => {
+        const page = await openPhone();
+
+        try {
+            const ink = await page.evaluate(async () => {
+                const screen = document.querySelector(".gt-screen") as HTMLElement;
+                const canvas = document.createElement("canvas");
+
+                canvas.width = 32;
+                canvas.height = 32;
+
+                const context = canvas.getContext("2d") as CanvasRenderingContext2D;
+
+                await document.fonts.ready;
+                context.font = `24px ${getComputedStyle(screen).fontFamily}`;
+                context.fillStyle = "#fff";
+                context.fillText("\uf121", 2, 24);
+
+                return [...context.getImageData(0, 0, 32, 32).data].reduce((sum, value, at) => (at % 4 === 3 ? sum + value : sum), 0);
+            });
+
+            expect(ink).toBeGreaterThan(0);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("the width of a cell", () => {
+    /**
+     * The cell is measured from the font, and a font is not there when the page first draws: a browser paints with the
+     * fallback and swaps the real font in when it has it. A cell measured against the fallback is a cell that is not the
+     * font's, so every run is a little too wide or too narrow and the line overlaps itself -- which is what a person
+     * sees as a garbled prompt.
+     */
+    test("is measured again when the font arrives after the first paint", async () => {
+        const page = await browser.newPage();
+
+        await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+        await page.setRequestInterception(true);
+
+        let release = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+
+        page.on("request", async (request) => {
+            const url = request.url();
+
+            // The app's font is held back, and the page is given another font to measure while it waits -- which is what
+            // a browser does with its fallback, only with a font that is not a monospace at all.
+            if (url.includes("JetBrainsMono.woff2")) {
+                await held;
+                await request.continue().catch(() => {});
+
+                return;
+            }
+
+            if (request.resourceType() === "document") {
+                const answer = await fetch(url);
+                const body = (await answer.text()).replace("</head>", "<style>.gt-screen { font-family: Georgia, serif !important }</style></head>");
+
+                await request.respond({ status: 200, contentType: "text/html", body }).catch(() => {});
+
+                return;
+            }
+
+            await request.continue().catch(() => {});
+        });
+
+        try {
+            await page.goto(`${URL_BASE}/`, { waitUntil: "domcontentloaded" });
+            await page.waitForSelector(".gt-pane .gt-row");
+            await settle(page, 600);
+
+            const before = await cellWidth(page);
+
+            // The stand-in goes, and the font arrives: from here the page draws with another font than the one it
+            // measured its cells with.
+            await page.evaluate(() => {
+                for (const style of document.querySelectorAll("style")) {
+                    if ((style.textContent ?? "").includes("Georgia")) style.remove();
+                }
+            });
+            release();
+            await page.evaluate(() => document.fonts.ready);
+            await settle(page, 800);
+
+            const after = await cellWidth(page);
+            const truth = await measuredCell(page);
+
+            // The first measurement was the stand-in font's, and the one that counts is the font's the page ends with.
+            expect(Math.abs(after - truth)).toBeLessThan(0.05);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    /** The cell that the screen draws with. */
+    const cellWidth = (page: Page) =>
+        page.$eval(".gt-screen", (screen) =>
+            Number.parseFloat(getComputedStyle(screen).getPropertyValue("--gt-cell-w")),
+        );
+
+    /** The width of the font's own cell, measured in the screen's font as it is now. */
+    const measuredCell = (page: Page) =>
+        page.$eval(".gt-screen", (screen) => {
+            const probe = document.createElement("span");
+
+            probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre";
+            probe.textContent = "0123456789";
+            screen.append(probe);
+
+            const width = probe.getBoundingClientRect().width / 10;
+
+            probe.remove();
+
+            return width;
+        });
+});
+
+describe("rendering in a scaled container", () => {
+    test("keeps adjacent prompt segments from overlapping", async () => {
+        const page = await browser.newPage();
+        await page.setRequestInterception(true);
+        page.on("request", async (request) => {
+            if (request.isNavigationRequest()) {
+                const response = await fetch(request.url());
+                const html = (await response.text()).replace(
+                    "</head>",
+                    "<style id=opening-animation>body { transform: scale(0.9); transform-origin: top left }</style></head>",
+                );
+                await request.respond({ status: 200, contentType: "text/html", body: html });
+            } else {
+                await request.continue();
+            }
+        });
+
+        try {
+            await page.goto(`${URL_BASE}/`, { waitUntil: "networkidle2" });
+            await page.waitForSelector(".gt-input");
+            // End the opening animation after the terminal has measured itself.
+            await page.evaluate(() => document.querySelector("#opening-animation")!.remove());
+            await page.evaluate(() => {
+                const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+                input.value = "printf '\\033[1mpi-pocket-ghostty\\033[0m on \\033[3mpi-pocket-ghostty\\033[0m END\\n'\n";
+                input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            });
+            await page.waitForFunction(() => [...document.querySelectorAll(".gt-row")].some(
+                (row) => row.textContent?.includes("pi-pocket-ghostty on pi-pocket-ghostty END"),
+            ));
+            const overlap = await page.evaluate(() => {
+                const row = [...document.querySelectorAll(".gt-row")].find(
+                    (element) => element.textContent?.includes("pi-pocket-ghostty on pi-pocket-ghostty END"),
+                )!;
+                const spans = [...row.children];
+                const first = spans.find((element) => element.textContent === "pi-pocket-ghostty")!;
+                const next = first.nextElementSibling!;
+                const range = document.createRange();
+                range.selectNodeContents(first);
+                return range.getBoundingClientRect().right - next.getBoundingClientRect().left;
+            });
+            expect(overlap).toBeLessThan(0.5);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});
+
+describe("the width of a run", () => {
+    /**
+     * Each run of a row is drawn in exactly the cells that the terminal gave it, so its glyphs have to fit inside that
+     * box: text that spills out of it is text that overlaps the run after it, which a person sees as a line whose words
+     * are on top of each other. A bold or an italic that a font does not have is the usual reason -- a browser makes one
+     * up by thickening the letters, and a made-up bold is wider than the cell.
+     */
+    const overflow = (page: Page) =>
+        page.evaluate(() => {
+            const rows = [...document.querySelectorAll(".gt-row")] as HTMLElement[];
+            const worst: Array<{ text: string; over: number }> = [];
+
+            for (const row of rows) {
+                for (const span of [...row.children] as HTMLElement[]) {
+                    const box = span.getBoundingClientRect().width;
+                    const range = document.createRange();
+
+                    range.selectNodeContents(span);
+
+                    const ink = range.getBoundingClientRect().width;
+                    const over = ink - box;
+
+                    if (over > 1) worst.push({ text: (span.textContent ?? "").slice(0, 16), over: Math.round(over) });
+                }
+            }
+
+            return worst;
+        });
+
+    const drawWith = async (page: Page, body: string) => {
+        await page.evaluate((text: string) => {
+            const input = document.querySelector(".gt-input") as HTMLTextAreaElement;
+
+            input.focus();
+            input.value = `clear; printf '${text}'; sleep 2\n`;
+            input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        }, body);
+        await settle(page, 900);
+    };
+
+    test("holds a bold line and an italic line inside their cells", async () => {
+        const page = await openPhone();
+
+        try {
+            await drawWith(page, "\\033[1mtom on call-graphs:master\\033[0m");
+            expect(await overflow(page)).toEqual([]);
+
+            await drawWith(page, "\\033[1;3mtom on call-graphs:master\\033[0m");
+            expect(await overflow(page)).toEqual([]);
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+
+    test("never makes up a weight, which is a bold that is wider than a cell", async () => {
+        const page = await openPhone();
+
+        try {
+            const synthesis = await page.$eval(".gt-screen", (screen) => {
+                const style = getComputedStyle(screen);
+
+                return { weight: style.fontSynthesisWeight, style: style.fontSynthesisStyle };
+            });
+
+            expect(synthesis.weight).toBe("none");
         } finally {
             await page.close();
         }

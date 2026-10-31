@@ -46,31 +46,6 @@ export function keyboardShown({ height, rest, viewportHeight, innerHeight, avail
     return (dropped || covered || cramped) && (typing === true || wasUp === true);
 }
 
-/**
- * The names that a Nerd Font goes by, in the order to try them: the same font is installed under a name that its build
- * chose, and a native terminal finds it where a browser does not. The first that this device has is the one to use.
- */
-const FONT_FAMILIES = [
-    '"JetBrainsMono Nerd Font"',
-    '"JetBrainsMono Nerd Font Mono"',
-    '"JetBrainsMono Nerd Font Propo"',
-    '"JetBrainsMono NF"',
-    '"JetBrainsMonoNF"',
-    '"JetBrainsMonoNL Nerd Font"',
-    '"JetBrains Mono Nerd Font"',
-    '"JetBrains Mono NF"',
-    '"JetBrains Mono Nerd Font Mono"',
-    '"Symbols Nerd Font Mono"',
-    '"Symbols Nerd Font"',
-    '"Hack Nerd Font"',
-    '"FiraCode Nerd Font"',
-    '"MesloLGS NF"',
-    '"JetBrains Mono"',
-    // Pi Pocket's own two: JetBrains Mono, and the icons alone. They are in every tab of the app, so the last resort is
-    // a font with the glyphs rather than whatever monospace a device happens to have.
-    '"Pocket Mono"',
-];
-
 /** The keys that go to the terminal as a key, not as the text that they would write. */
 const KEYS_SENT_AS_KEYS = new Set([
     "ArrowUp",
@@ -115,9 +90,16 @@ function decoration(flags) {
 
 /** One span of a row, reused from the frame before when the row keeps its shape. */
 function paint(span, run) {
-    const [text, fg, bg, flags] = run;
+    const [text, fg, bg, flags, columns] = run;
 
     if (span.textContent !== text) span.textContent = text;
+
+    // The span is as wide as the cells that the terminal gave it, whatever the font makes of the glyphs inside: a font
+    // that draws one wider, or narrower, than a cell would otherwise push everything after it out of line, and the
+    // cursor, which is drawn at the terminal's column, would sit somewhere that the text is not.
+    span.style.display = "inline-block";
+    span.style.verticalAlign = "top";
+    span.style.width = columns === undefined ? "" : `calc(var(--gt-cell-w, 1ch) * ${columns})`;
 
     const style = span.style;
 
@@ -169,7 +151,6 @@ export class TerminalView {
     #cursorEl = null;
     #input = null;
     #font = 13;
-    #family = null;
     #cell = { width: 8, height: 17 };
 
     #id = null;
@@ -254,14 +235,20 @@ export class TerminalView {
         this.#cursorEl = cursor;
         this.#input = input;
 
-        // The name that the browser has, which a native terminal may know by another one: the page uses that one.
-        this.#family = this.#fontFamily();
-        if (this.#family !== null) screen.style.fontFamily = `${this.#family}, "Pocket Nerd Symbols", ui-monospace, monospace`;
-
-        console.info(`[ghostty-terminal] font: ${this.#family ?? "no Nerd Font found"}`);
-
         this.#listen();
         this.#applyFont();
+
+        // A browser draws with a fallback font until it has the real one, so a cell measured at the first paint is the
+        // fallback's cell: every run would then be a little too wide or too narrow for the font that arrives, and a line
+        // would overlap itself. When the font comes, the grid is measured again.
+        const remeasure = () => {
+            this.#measure();
+            this.#measureSoon();
+        };
+
+        document.fonts?.ready.then(remeasure).catch(() => {});
+        document.fonts?.addEventListener?.("loadingdone", remeasure);
+        this.#stops.push(() => document.fonts?.removeEventListener?.("loadingdone", remeasure));
     }
 
     #listen() {
@@ -415,10 +402,12 @@ export class TerminalView {
         const probe = document.createElement("span");
 
         probe.className = "gt-probe";
-        probe.textContent = "0123456789";
+        // offsetWidth is in layout pixels, unlike getBoundingClientRect(), which includes ancestor transforms.
+        // A long probe keeps the integer rounding of offsetWidth small relative to a single cell.
+        probe.textContent = "0123456789".repeat(10);
         this.#screen.append(probe);
 
-        const width = probe.getBoundingClientRect().width / 10;
+        const width = probe.offsetWidth / 100;
 
         probe.remove();
 
@@ -432,9 +421,8 @@ export class TerminalView {
 
     /** The columns and rows that fit the room that the page has now. */
     #fit() {
-        const rect = this.#screen.getBoundingClientRect();
-        const cols = Math.floor((rect.width - 2) / this.#cell.width);
-        const rows = Math.floor((rect.height - 2) / this.#cell.height);
+        const cols = Math.floor(this.#screen.clientWidth / this.#cell.width);
+        const rows = Math.floor(this.#screen.clientHeight / this.#cell.height);
 
         return {
             cols: Math.max(20, Math.min(400, cols)),
@@ -544,47 +532,6 @@ export class TerminalView {
     focus() {
         this.#place();
         this.#input.focus({ preventScroll: true });
-    }
-
-    /**
-     * The first of the names that this browser has, measured against a name that no device has: a family that is not
-     * there falls back to the same font as the name that is not there, and measures the same as it.
-     */
-    #fontFamily() {
-        const width = (family) => {
-            const probe = document.createElement("span");
-
-            probe.className = "gt-probe";
-            probe.style.font = `100px ${family}`;
-            probe.textContent = "MWmw0Oii";
-            this.#screen.append(probe);
-
-            const measured = probe.getBoundingClientRect().width;
-
-            probe.remove();
-
-            return measured;
-        };
-
-        try {
-            const absent = width('"No Such Font 4F2A"');
-
-            for (const family of FONT_FAMILIES) {
-                if (Math.abs(width(family) - absent) > 1) return family;
-            }
-        } catch {
-            // A browser that will not measure: the stylesheet's own list still applies.
-        }
-
-        return null;
-    }
-
-    /**
-     * Says which font the screen draws with. There is nothing to warn about when it found none: the stylesheet's own
-     * list ends with the two fonts that Pi Pocket serves, so the icons are there whatever a device has installed.
-     */
-    #sayFont() {
-        this.#publish({ font: this.#family });
     }
 
     /** Hands text to the browser's clipboard, as a program asked with OSC 52. */
@@ -773,8 +720,6 @@ export class TerminalView {
 
             this.#stashed.clear();
             this.#input.focus({ preventScroll: true });
-
-            this.#sayFont();
         } catch (error) {
             if (!this.#destroyed) this.#publish({ error: error.message });
         } finally {

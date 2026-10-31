@@ -26,8 +26,12 @@ const BLINK = 64;
 const INVERSE = 128;
 const INVISIBLE = 256;
 
-/** A piece of a row that shares a look: `[text, foreground, background, flags]`. An empty color is the default. */
-type Run = [text: string, fg: string, bg: string, flags: number];
+/**
+ * A piece of a row that shares a look: `[text, foreground, background, flags, columns]`. An empty color is the default,
+ * and `columns` is how many of the terminal's own cells the text covers, which is what the page draws it in: a font
+ * decides how wide a glyph is, and a terminal decides how many cells it takes.
+ */
+type Run = [text: string, fg: string, bg: string, flags: number, columns: number];
 
 interface CellLook {
     readonly fg: string;
@@ -93,12 +97,14 @@ function runsOf(cells: readonly RenderCell[], palette: readonly (readonly [numbe
 
         const look = lookOf(cell.style, palette);
         const text = cell.text === "" ? " " : cell.text;
+        const columns = cell.wide ? 2 : 1;
         const last = runs.at(-1);
 
         if (last !== undefined && sameLook({ fg: last[1], bg: last[2], flags: last[3] }, look)) {
             last[0] += text;
+            last[4] += columns;
         } else {
-            runs.push([text, look.fg, look.bg, look.flags]);
+            runs.push([text, look.fg, look.bg, look.flags, columns]);
         }
 
         if (text === " ") pending += " ";
@@ -109,6 +115,7 @@ function runsOf(cells: readonly RenderCell[], palette: readonly (readonly [numbe
     if (pending !== "" && runs.length > 0) {
         const last = runs.at(-1)!;
         last[0] = last[0].slice(0, last[0].length - pending.length);
+        last[4] -= pending.length;
 
         if (last[0] === "") runs.pop();
     }
