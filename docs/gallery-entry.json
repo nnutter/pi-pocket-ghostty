@@ -1,0 +1,72 @@
+{
+    "name": "ghostty-terminal",
+    "title": "Ghostty",
+    "description": "Ghostty: a real terminal in Pi Pocket, in panes beside a session. The shell runs on the server in the session's folder, and Ghostty's own engine (libghostty-vt) draws its screen, so an editor's cursor shapes, its icons, and its clipboard work as they do in Ghostty. It needs Bun, and a one-time install of libghostty-vt in its runtime folder, ~/.pi-pocket/ghostty-terminal.",
+    "tags": [
+        "terminal",
+        "shell",
+        "pty",
+        "ghostty",
+        "neovim",
+        "editor"
+    ],
+    "author": {
+        "name": "Nathan Nutter",
+        "github": "nnutter"
+    },
+    "version": "0.1.0",
+    "source": {
+        "repo": "nnutter/pi-pocket-ghostty",
+        "commit": "20c1bcde94d82c7f31b61fc6b27f46840037ee21",
+        "path": "extensions"
+    },
+    "files": [
+        {
+            "name": "ghostty-terminal.ts",
+            "sha256": "a929147240dbdbed0b5ab9e70c149eafdb5a9c07e904019711e1ffbe83e9c2e3",
+            "size": 20196
+        },
+        {
+            "name": "ghostty-terminal/index.js",
+            "sha256": "35b95574c5ae3c46e0266401990986cb6f307f4044760ab3757c3efa4c8ac138",
+            "size": 26046
+        },
+        {
+            "name": "ghostty-terminal/terminal.js",
+            "sha256": "772ddc45b9e3399fdb9eda3d199e7657167db1821366d79b3aaf386721e61f0a",
+            "size": 35771
+        },
+        {
+            "name": "ghostty-terminal/terminal.css",
+            "sha256": "d54bcd9eba21078e9c409a4d9404a830afe1fc12828bc56bd7929b13d0aba706",
+            "size": 11875
+        }
+    ],
+    "pocketApi": 2,
+    "minPocket": "0.22.0",
+    "declares": {
+        "extensions": [
+            "ghostty-terminal"
+        ],
+        "tools": [],
+        "readOnlyTools": [],
+        "hooks": [],
+        "sections": [],
+        "wraps": [],
+        "routes": [
+            "GET terminals",
+            "POST terminals",
+            "GET terminals/:id",
+            "POST terminals/:id/input",
+            "POST terminals/:id/paste",
+            "POST terminals/:id/focus",
+            "POST terminals/:id/clipboard",
+            "POST terminals/:id/resize",
+            "POST terminals/:id/scroll",
+            "DELETE terminals/:id"
+        ],
+        "client": "owner",
+        "access": "owner"
+    },
+    "revoked": []
+}
