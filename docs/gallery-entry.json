@@ -17,19 +17,19 @@
     "version": "0.1.0",
     "source": {
         "repo": "nnutter/pi-pocket-ghostty",
-        "commit": "20c1bcde94d82c7f31b61fc6b27f46840037ee21",
+        "commit": "cb5704d4214545ea0ee8aefc6da6af5c7e3b5ad4",
         "path": "extensions"
     },
     "files": [
         {
             "name": "ghostty-terminal.ts",
-            "sha256": "a929147240dbdbed0b5ab9e70c149eafdb5a9c07e904019711e1ffbe83e9c2e3",
-            "size": 20196
+            "sha256": "250dcc5d618223ec96e7c723676f7c05a63d9fc9be376919185c785aa8b93c61",
+            "size": 20667
         },
         {
             "name": "ghostty-terminal/index.js",
-            "sha256": "35b95574c5ae3c46e0266401990986cb6f307f4044760ab3757c3efa4c8ac138",
-            "size": 26046
+            "sha256": "def0341da73b488389409807a29b4ed0f08ffbc02283fc156f06b7cd0b0f85f2",
+            "size": 27033
         },
         {
             "name": "ghostty-terminal/terminal.js",
@@ -37,9 +37,14 @@
             "size": 35771
         },
         {
+            "name": "ghostty-terminal/terminals.js",
+            "sha256": "4157b32f6f977501a581ff6c1e6319157a3a339f8cd5f63c166b00b04832970c",
+            "size": 7045
+        },
+        {
             "name": "ghostty-terminal/terminal.css",
-            "sha256": "d54bcd9eba21078e9c409a4d9404a830afe1fc12828bc56bd7929b13d0aba706",
-            "size": 11875
+            "sha256": "2f2891b210f3ad1e1522d534dc3b6856fd361d06d328fc0527ec5206c72dfe54",
+            "size": 14251
         }
     ],
     "pocketApi": 2,

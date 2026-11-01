@@ -157,6 +157,7 @@ export default function createGhosttyTerminal(_host: Host | null, web: Web) {
     function summary(terminal: Terminal) {
         return {
             id: terminal.id,
+            conversation: terminal.conversation,
             cwd: terminal.cwd,
             argv: terminal.argv,
             cols: terminal.cols,
@@ -396,8 +397,13 @@ export default function createGhosttyTerminal(_host: Host | null, web: Web) {
     web.route("GET", "terminals", (request) => {
         closeArchived(request.sessions());
 
+        const named = new Map(request.sessions().map((each) => [each.id, each.title]));
+
         return {
-            terminals: [...terminals.values()].map(summary),
+            // Every shell, with the session that it works in: the page that lists them all says whose each one is, so that
+            // a person can tell the shell beside their work from the one that a closed tab left behind.
+            terminals: [...terminals.values()].map((each) => ({ ...summary(each), session: named.get(each.conversation) ?? null })),
+            max: MAX_TERMINALS,
             bun: findBun() !== null,
             runner: existsSync(join(runtimeDir(), "pty-host.ts")),
         };

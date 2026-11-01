@@ -44,6 +44,7 @@ Settings, in Menu → Extensions: the shell to run (empty: your own, with `-l`),
 - `extensions/ghostty-terminal/index.js` — the panel, its tile in the places, and a launcher action.
 - `extensions/ghostty-terminal/terminal.js` — the screen: runs of cells painted into rows of spans, the cursor, the wheel for scrollback,
   and a hidden textarea whose keystrokes go to `libghostty-vt`'s key encoder on the server.
+- `extensions/ghostty-terminal/terminals.js` — the page that lists every shell, whichever session started it, and ends one.
 - `extensions/ghostty-terminal/terminal.css` — the look, from the app's theme tokens.
 
 Why the extra process: `libghostty-vt` imports `bun:ffi`, which Node does not have. Nothing else needs Bun.
@@ -67,6 +68,10 @@ module refuses a ninth. A pane that goes gives the keys back to the pane that ha
 was split from: closing a split lands where the person was, and closing again walks back the way that they came.
 Closing the panel ends the panes that would show nowhere and keeps the shell of the first: the one a person comes back
 to is the one that was there. So does opening the Browser or Files panel, since a window shows one panel at a time.
+
+A tab that reloads or closes runs none of that, so the panes that it split keep their shells and their places among the
+eight, and no page shows them. **All terminals**, on the rail, is the page that shows them: every shell that the module
+keeps, with the session and the folder that it works in, and a button that ends it after a second tap.
 
 ## The font
 

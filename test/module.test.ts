@@ -20,10 +20,10 @@ function module(
             ...options.settings,
         },
         sessions: (options.sessions ?? [{ id: 7, cwd: root }]).map((each) => ({
+            ...each,
             title: each.title ?? "Here",
             archived: false,
             updatedAt: 0,
-            ...each,
         })),
     });
 
@@ -120,6 +120,31 @@ test("resizes the pty to the columns and rows that the page gives", async () => 
 
     const listing = await fake.call<{ terminals: Array<{ cols: number; rows: number }> }>({ method: "GET", path: "terminals" });
     expect(listing.terminals[0]).toMatchObject({ cols: 100, rows: 30 });
+});
+
+test("lists every shell with the session that it works in, and the most that it keeps", async () => {
+    const fake = module({
+        sessions: [
+            { id: 7, cwd: root },
+            { id: 8, cwd: "/", title: "Root" },
+        ],
+    });
+
+    await fake.call({ method: "POST", path: "terminals", body: { conversation: 7, cols: 60, rows: 12 } });
+    await fake.call({ method: "POST", path: "terminals", body: { conversation: 8, cols: 60, rows: 12 } });
+
+    const listing = await fake.call<{
+        terminals: Array<{ conversation: number; session: string | null; alive: boolean }>;
+        max: number;
+    }>({ method: "GET", path: "terminals" });
+
+    // A page that lists them all says whose each one is: the session's title is what a person knows it by.
+    expect(listing.terminals.map((each) => [each.conversation, each.session])).toEqual([
+        [7, "Here"],
+        [8, "Root"],
+    ]);
+    expect(listing.terminals.every((each) => each.alive)).toBe(true);
+    expect(listing.max).toBe(8);
 });
 
 test("keeps one terminal for a session, and another for another session", async () => {
