@@ -1367,3 +1367,30 @@ describe("the screen", () => {
         return shape;
     }
 });
+
+describe("the page of every terminal", () => {
+    test("lists the shells, and ends the one that a person picks after a second tap", async () => {
+        // A tab that leaves the terminal keeps its shell, as a reload does: this page is where a person finds it again,
+        // and a shell may be in the middle of something, so ending one takes two taps.
+        const page = await openPhone();
+
+        try {
+            await page.goto(`${URL_BASE}/?page=terminals`, { waitUntil: "networkidle2" });
+            await page.waitForSelector(".gt-terminal-row");
+
+            const before = await page.$$eval(".gt-terminal-row", (rows) => rows.length);
+
+            await tap(page, ".gt-terminal-row .gt-terminal-end");
+            expect(await page.$(".gt-terminal-keep")).not.toBeNull();
+
+            await tap(page, ".gt-terminal-row .gt-terminal-end");
+            await page.waitForFunction((was) => document.querySelectorAll(".gt-terminal-row").length === was - 1, { timeout: 10_000 }, before);
+
+            const head = await page.$eval(".gt-list-head", (one) => one.textContent ?? "");
+
+            expect(head).toContain("of 8 shells running");
+        } finally {
+            await page.close();
+        }
+    }, 30_000);
+});

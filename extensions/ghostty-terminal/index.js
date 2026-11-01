@@ -1,10 +1,12 @@
 // Ghostty terminal's browser module: a page on the rail, and a launcher action, that show one or more shells in the
-// session's folder. `ghostty-terminal.ts` starts the pty of each pane and sends frames; `terminal.js` draws them.
+// session's folder. `ghostty-terminal.ts` starts the pty of each pane and sends frames; `terminal.js` draws them;
+// `terminals.js` is the page that lists every shell, whichever session started it.
 
 /** The version of `pocket` this module was written for. */
 export const pocketApi = 1;
 
 import { TerminalView, keyboardShown, restingHeight } from "./terminal.js";
+import { TerminalsPage } from "./terminals.js";
 
 /** A prompt, as a 24×24 stroked path like the app's own icons. */
 const PROMPT = "M5 7l4 4-4 4M12 16h7";
@@ -638,6 +640,23 @@ export default function setup(pocket) {
             page: "terminal",
         });
     }
+
+    function Terminals() {
+        return html`<${TerminalsPage} pocket=${pocket} />`;
+    }
+
+    // Every shell, whichever session started it: a pane that a closed tab or a reload left behind keeps one of the eight
+    // places and shows nowhere. This page is where a person finds it again, and ends it, before the eighth is gone. It
+    // draws the prompt that the terminal's tile draws, because it is the same terminal, seen from outside a session.
+    pocket.page({ id: "terminals", title: "All terminals", component: Terminals });
+    pocket.rail({ id: "terminals", title: "All terminals", iconPath: PROMPT, page: "terminals" });
+    pocket.launcher({
+        id: "terminals",
+        label: "All terminals",
+        detail: "every shell that is running, whichever session started it",
+        iconPath: PROMPT,
+        page: "terminals",
+    });
 
     // A terminal that opens and closes on one key is a terminal that is beside the work rather than in the way.
     const onKey = (event) => {

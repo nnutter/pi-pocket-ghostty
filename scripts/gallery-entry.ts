@@ -19,6 +19,7 @@ export const FILES = [
     "ghostty-terminal.ts",
     "ghostty-terminal/index.js",
     "ghostty-terminal/terminal.js",
+    "ghostty-terminal/terminals.js",
     "ghostty-terminal/terminal.css",
 ];
 

@@ -85,7 +85,9 @@
 
             const html = htm.bind(h);
             const listeners = new Map();
-            let page = null;
+            // The pages and panels that the module adds, by id, and the one that shows: the app has one of each, and the
+            // preview names the one that it shows in its address, as `?page=terminals`.
+            const screens = new Map();
 
             const pocket = {
                 html,
@@ -111,21 +113,21 @@
                     </svg>`,
                 conversationId: () => 1,
                 page(config) {
-                    page = config;
+                    screens.set(config.id, config);
                 },
                 panel(config) {
-                    page = config;
+                    screens.set(config.id, config);
                 },
                 rail() {},
                 launcher() {},
-                openPage() {
-                    mount();
+                openPage(id) {
+                    show(id);
                 },
                 closePage() {
                     unmount();
                 },
-                openPanel() {
-                    mount();
+                openPanel(id) {
+                    show(id);
                 },
                 closePanel() {
                     unmount();
@@ -172,14 +174,22 @@
             // same thing with one element, so that a page that closes and opens again looks like one.
             const root = document.getElementById("page");
 
+            // The app gives a page or a panel its close; the preview has one element, so every close is that one.
             const close = () => unmount();
 
-            function mount() {
-                root.textContent = "";
-                render(h(page.component, { close }), root);
-            }
+            function show(id) {
+                const screen = screens.get(id);
 
-            // The app gives a page or a panel its close; the preview has one element, so every close is that one.
+                root.textContent = "";
+
+                if (screen === undefined) {
+                    root.textContent = `The preview has no page or panel called ${id}.`;
+
+                    return;
+                }
+
+                render(h(screen.component, { close }), root);
+            }
 
             function unmount() {
                 render(null, root);
@@ -187,7 +197,7 @@
             }
 
             setup(pocket);
-            mount();
+            show(new URLSearchParams(location.search).get("page") ?? "terminal");
         </script>
     </body>
 </html>
